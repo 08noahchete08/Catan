@@ -8,10 +8,24 @@
 const UI = {
   mode: null, viewer: null, aiTimer: null, speed: 650, modal: null,
   trade: null, bank: null, yop: [], discardSel: null, online: false, winnerShown: false,
+  view3d: (() => { try { return localStorage.getItem('catan-3d') !== '0'; } catch (e) { return true; } })(),
+  lastDice: null,
 };
 const $ = s => document.querySelector(s);
 const DEFAULT_NAMES = ['Ana', 'Bruno', 'Carla', 'Diego', 'Elena', 'Fede'];
-const DICE_FACES = ['⚀', '⚁', '⚂', '⚃', '⚄', '⚅'];
+const DIE_PIPS = { 1: [5], 2: [3, 7], 3: [3, 5, 7], 4: [1, 3, 7, 9], 5: [1, 3, 5, 7, 9], 6: [1, 3, 4, 6, 7, 9] };
+
+function dieHtml(n, cls) {
+  let html = '';
+  for (let i = 1; i <= 9; i++) html += `<i class="${n && DIE_PIPS[n].includes(i) ? 'on' : ''}"></i>`;
+  return `<span class="die ${cls}">${html}</span>`;
+}
+
+function toggleView() {
+  UI.view3d = !UI.view3d;
+  try { localStorage.setItem('catan-3d', UI.view3d ? '1' : '0'); } catch (e) { /* sin almacenamiento */ }
+  if (G) { computeView(); render(); }
+}
 
 function costIcons(cost) {
   return Object.entries(cost).map(([r, n]) => RES_INFO[r].icon.repeat(n)).join('');
@@ -170,122 +184,14 @@ function render() {
   renderTurnPanel();
   renderHand();
   renderLog();
+  $('#btn-3d').textContent = UI.view3d ? '🗺️ Vista 2D' : '🧊 Vista 3D';
   $('#room-tag').innerHTML = UI.online && NET.room ? `🌐 Sala <b>${NET.room}</b>` : '';
   $('#chat-panel').classList.toggle('hidden', !UI.online);
   syncModals();
 }
 
 // ============================ Tablero ============================
-function computeView() {
-  const xs = [], ys = [];
-  G.vertices.forEach(v => { xs.push(v.x); ys.push(v.y); });
-  G.ports.forEach(p => { xs.push(p.x); ys.push(p.y); });
-  const pad = 34;
-  const minX = Math.min(...xs) - pad, minY = Math.min(...ys) - pad - 40; // espacio para el cartel
-  const w = Math.max(...xs) + pad - minX, h = Math.max(...ys) + pad - minY;
-  $('#board').setAttribute('viewBox', `${minX} ${minY} ${w} ${h}`);
-}
-
-function hexPoints(cx, cy, r) {
-  const pts = [];
-  for (let k = 0; k < 6; k++) {
-    const a = Math.PI / 180 * (60 * k - 90);
-    pts.push((cx + r * Math.cos(a)).toFixed(1) + ',' + (cy + r * Math.sin(a)).toFixed(1));
-  }
-  return pts.join(' ');
-}
-
-function renderBoard() {
-  const a = humanActor();
-  let vT = [], eT = [], cT = [], hT = false;
-  if (a != null) {
-    if (G.phase === 'setup-settlement') vT = settlementSpots(a, true);
-    else if (G.phase === 'setup-road') eT = roadSpots(a, G.lastSettlement);
-    else if (G.phase === 'road-building') eT = roadSpots(a);
-    else if (G.phase === 'robber') hT = true;
-    else if (canBuildNow(a)) {
-      if (UI.mode === 'camino') eT = roadSpots(a);
-      else if (UI.mode === 'poblado') vT = settlementSpots(a, false);
-      else if (UI.mode === 'ciudad') cT = citySpots(a);
-    }
-  }
-  const out = [];
-  out.push(`<defs>
-    <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%"><feDropShadow dx="0" dy="1.5" stdDeviation="1.5" flood-opacity=".45"/></filter>
-    <radialGradient id="tokenGrad" cx="40%" cy="35%" r="70%"><stop offset="0" stop-color="#fffaf0"/><stop offset="1" stop-color="#ead9b0"/></radialGradient>
-  </defs>`);
-
-  for (const p of G.ports) {
-    const e = G.edges[p.edge];
-    for (const vid of e.v) {
-      const v = G.vertices[vid];
-      out.push(`<line x1="${v.x}" y1="${v.y}" x2="${p.x}" y2="${p.y}" class="dock"/>`);
-    }
-    const generic = p.type === 'generic';
-    out.push(`<g class="port" transform="translate(${p.x},${p.y})">
-      <circle r="19" class="port-bg" ${generic ? '' : `style="stroke:${RES_INFO[p.type].color}"`}/>
-      <text y="-3" class="port-icon">${generic ? '❓' : RES_INFO[p.type].icon}</text>
-      <text y="12" class="port-rate">${generic ? '3:1' : '2:1'}</text>
-      <title>${generic ? 'Puerto 3:1: cambia 3 cartas iguales por 1' : `Puerto 2:1 de ${RES_INFO[p.type].name.toLowerCase()}`}</title>
-    </g>`);
-  }
-
-  for (const h of G.hexes) {
-    const t = TERRAIN[h.terrain];
-    const target = hT && h.id !== G.robber;
-    out.push(`<g class="hex ${target ? 'hex-target' : ''}" ${target ? `data-h="${h.id}"` : ''}>
-      <polygon points="${hexPoints(h.x, h.y, HEX_R)}" class="hex-frame"/>
-      <polygon points="${hexPoints(h.x, h.y, HEX_R - 5)}" fill="${t.color}" stroke="${t.dark}" stroke-width="2"/>
-      <text x="${h.x}" y="${h.y - 24}" class="hex-icon">${t.icon}</text>
-      <title>${hexName(h)}</title>`);
-    if (h.number) {
-      const hot = h.number === 6 || h.number === 8;
-      out.push(`<circle cx="${h.x}" cy="${h.y + 10}" r="18" fill="url(#tokenGrad)" class="token"/>
-        <text x="${h.x}" y="${h.y + 13}" class="num ${hot ? 'hot' : ''}">${h.number}</text>
-        <text x="${h.x}" y="${h.y + 23}" class="pips ${hot ? 'hot' : ''}">${'•'.repeat(pips(h.number))}</text>`);
-    }
-    out.push('</g>');
-  }
-
-  const rh = G.hexes[G.robber];
-  out.push(`<g class="robber" transform="translate(${rh.x - (rh.number ? 28 : 0)},${rh.y + 8})" filter="url(#shadow)">
-    <ellipse cx="0" cy="14" rx="10" ry="3.5" fill="rgba(0,0,0,.35)"/>
-    <path d="M-9 14 C-9 2 -5 -2 0 -2 C5 -2 9 2 9 14 Z" fill="#3a3a44" stroke="#111" stroke-width="1.2"/>
-    <circle cx="0" cy="-8" r="6.5" fill="#3a3a44" stroke="#111" stroke-width="1.2"/>
-    <title>Ladrón</title></g>`);
-
-  for (const e of G.edges) {
-    if (e.road === null) continue;
-    const [a1, b1] = e.v.map(id => G.vertices[id]);
-    const x1 = a1.x + (b1.x - a1.x) * 0.14, y1 = a1.y + (b1.y - a1.y) * 0.14;
-    const x2 = b1.x + (a1.x - b1.x) * 0.14, y2 = b1.y + (a1.y - b1.y) * 0.14;
-    out.push(`<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" class="road-outline"/>
-      <line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" class="road" stroke="${P(e.road).color}"/>`);
-  }
-  for (const eid of eT) {
-    const [a1, b1] = G.edges[eid].v.map(id => G.vertices[id]);
-    out.push(`<line x1="${a1.x}" y1="${a1.y}" x2="${b1.x}" y2="${b1.y}" class="edge-target" data-e="${eid}"/>`);
-  }
-
-  for (const v of G.vertices) {
-    if (!v.building) continue;
-    const c = P(v.building.owner).color;
-    const path = v.building.type === 'ciudad'
-      ? 'M-15 12 H15 V-3 H3 V-9 L-6 -17 L-15 -9 Z'
-      : 'M-10 10 H10 V-2 L0 -12 L-10 -2 Z';
-    out.push(`<path transform="translate(${v.x},${v.y})" d="${path}" fill="${c}" class="building" filter="url(#shadow)">
-      <title>${esc(P(v.building.owner).name)}: ${v.building.type}</title></path>`);
-  }
-  for (const vid of vT) {
-    const v = G.vertices[vid];
-    out.push(`<circle cx="${v.x}" cy="${v.y}" r="10" class="v-target" data-v="${vid}"/>`);
-  }
-  for (const vid of cT) {
-    const v = G.vertices[vid];
-    out.push(`<circle cx="${v.x}" cy="${v.y}" r="19" class="v-target city" data-v="${vid}"/>`);
-  }
-  $('#board').innerHTML = out.join('');
-}
+// El dibujo del tablero está en boardview.js
 
 function onBoardClick(ev) {
   const t = ev.target.closest('[data-v],[data-e],[data-h]');
@@ -366,9 +272,13 @@ function renderPlayers() {
 
 function renderTurnPanel() {
   const a = humanActor();
+  // Los dados giran solo cuando hay una tirada nueva
+  const key = G.dice ? `${G.id}-${G.turn}-${G.dice}` : null;
+  const roll = key && key !== UI.lastDice ? 'rolling' : '';
+  UI.lastDice = key;
   const dice = G.dice
-    ? `<div class="dice ${G.dice[0] + G.dice[1] === 7 ? 'seven' : ''}"><span>${DICE_FACES[G.dice[0] - 1]}</span><span>${DICE_FACES[G.dice[1] - 1]}</span><b>${G.dice[0] + G.dice[1]}</b></div>`
-    : '<div class="dice empty"><span>⚀</span><span>⚀</span><b>–</b></div>';
+    ? `<div class="dice ${G.dice[0] + G.dice[1] === 7 ? 'seven' : ''}">${dieHtml(G.dice[0], roll)}${dieHtml(G.dice[1], roll + ' second')}<b>${G.dice[0] + G.dice[1]}</b></div>`
+    : `<div class="dice empty">${dieHtml(0, '')}${dieHtml(0, '')}<b>–</b></div>`;
   let html = `<div class="turn-head"><div><div class="turn-num">${G.turn ? 'Turno ' + G.turn : 'Colocación inicial'}</div>
     <div class="turn-who">${G.phase === 'gameover' ? 'Partida terminada' : 'Juega ' + pname(G.current)}</div></div>${dice}</div>`;
 
@@ -695,6 +605,7 @@ function onClick(ev) {
       closeModal(); render();
       return;
     case 'rules': showRules(); return;
+    case 'toggle-3d': toggleView(); return;
     case 'menu-exit':
       if (UI.online) leaveOnline(); else exitToMenu();
       return;
