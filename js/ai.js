@@ -87,6 +87,21 @@ const AI = {
     return best;
   },
 
+  costOf(g) { return g === 'ruta' ? COSTS.camino : COSTS[g]; },
+
+  // Camino que más alarga la ruta propia (para pelear la Gran Ruta Comercial)
+  longRoadEdge(pid) {
+    const base = longestRoadFor(pid);
+    let best = null, bestLen = base;
+    for (const eid of roadSpots(pid)) {
+      G.edges[eid].road = pid;
+      const len = longestRoadFor(pid);
+      G.edges[eid].road = null;
+      if (len > bestLen) { bestLen = len; best = eid; }
+    }
+    return best;
+  },
+
   goal(pid) {
     const p = P(pid);
     const opts = [];
@@ -97,9 +112,11 @@ const AI = {
     if (G.devDeck.length) opts.push(['carta', -0.5]);
     let best = null, bs = Infinity;
     for (const [g, bonus] of opts) {
-      const s = AI.missing(p.res, COSTS[g]) - bonus;
+      const s = AI.missing(p.res, AI.costOf(g)) - bonus;
       if (s < bs) { bs = s; best = g; }
     }
+    // Sin nada más que construir: alargar el camino para conseguir la Gran Ruta
+    if (!best && p.roads > 0 && G.longestHolder !== pid && AI.longRoadEdge(pid) !== null) best = 'ruta';
     return best;
   },
 
@@ -134,7 +151,7 @@ const AI = {
     const need = G.discardNeed[pid];
     const tmp = { ...P(pid).res };
     const g = AI.goal(pid);
-    const cost = g ? COSTS[g] : {};
+    const cost = g ? AI.costOf(g) : {};
     const sel = zeroRes();
     for (let i = 0; i < need; i++) {
       let best = null, bv = -Infinity;
@@ -155,7 +172,7 @@ const AI = {
     if (vp(proposer, false) >= 8) return false;
     const g = AI.goal(aiId);
     if (!g) return false;
-    const cost = COSTS[g];
+    const cost = AI.costOf(g);
     const after = { ...me.res };
     RES.forEach(r => { after[r] += (receive[r] || 0) - (giveAway[r] || 0); });
     const before = AI.missing(me.res, cost), now = AI.missing(after, cost);
@@ -186,7 +203,7 @@ const AI = {
     if (playableDev(pid, 'abundancia')) {
       const g = AI.goal(pid);
       if (g) {
-        const cost = COSTS[g];
+        const cost = AI.costOf(g);
         const miss = [];
         RES.forEach(r => { for (let i = p.res[r]; i < (cost[r] || 0); i++) miss.push(r); });
         if (miss.length >= 1 && miss.length <= 2) {
@@ -200,7 +217,7 @@ const AI = {
 
   tryBankTrade(pid, g) {
     if (!g || G.aiTrades >= 4) return false;
-    const p = P(pid), cost = COSTS[g];
+    const p = P(pid), cost = AI.costOf(g);
     const need = RES.filter(r => (cost[r] || 0) > p.res[r] && G.bank[r] > 0);
     if (!need.length) return false;
     const order = RES.slice().sort((a, b) => (p.res[b] - (cost[b] || 0)) - (p.res[a] - (cost[a] || 0)));
@@ -217,7 +234,7 @@ const AI = {
   tryPlayerTrade(pid, g) {
     if (!g || G.aiOffers >= 1) return false;
     G.aiOffers++;
-    const p = P(pid), cost = COSTS[g];
+    const p = P(pid), cost = AI.costOf(g);
     const need = RES.filter(r => (cost[r] || 0) > p.res[r]);
     const surplus = RES.filter(r => p.res[r] - (cost[r] || 0) >= 1 && !need.includes(r))
       .sort((a, b) => (p.res[b] - (cost[b] || 0)) - (p.res[a] - (cost[a] || 0)));
@@ -253,6 +270,10 @@ const AI = {
       if (t) return buildRoad(pid, t.edge);
     }
     if (g === 'carta' && canAfford(pid, COSTS.carta) && G.devDeck.length) return buyDev(pid);
+    if (allowRoad && g === 'ruta' && canAfford(pid, COSTS.camino)) {
+      const e = AI.longRoadEdge(pid);
+      if (e !== null) return buildRoad(pid, e);
+    }
     return false;
   },
 
@@ -276,6 +297,14 @@ const AI = {
   specialStep(pid) {
     if (AI.buildBest(pid, true)) return true;
     return endSpecial(pid);
+  },
+
+  // Acción del jugador en pareja: construir, comerciar con el banco y una carta
+  pairedStep(pid) {
+    if (AI.tryDev(pid)) return true;
+    if (AI.buildBest(pid, true)) return true;
+    if (AI.tryBankTrade(pid, AI.goal(pid))) return true;
+    return endPaired(pid);
   },
 
   act() {
@@ -308,6 +337,7 @@ const AI = {
       }
       case 'main': ok = AI.mainStep(pid); break;
       case 'special-build': ok = AI.specialStep(pid); break;
+      case 'paired': ok = AI.pairedStep(pid); break;
     }
     if (!ok) AI.fallback(pid);
   },
@@ -332,6 +362,7 @@ const AI = {
       case 'road-building': endRoadBuilding(pid); break;
       case 'main': endTurn(pid); break;
       case 'special-build': endSpecial(pid); break;
+      case 'paired': endPaired(pid); break;
     }
   },
 };

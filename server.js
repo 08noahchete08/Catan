@@ -310,7 +310,8 @@ function scheduleAI(room) {
 function startGame(room) {
   const setup = room.seats.map(s => ({ name: s.name, color: s.color, isAI: s.isAI }));
   room.engine = makeEngine();
-  room.engine.call('newGame(__args[0], __args[1])', setup, { special: room.options.special });
+  const { winPoints, mode5, cutRoads } = room.options;
+  room.engine.call('newGame(__args[0], __args[1])', setup, { winPoints, mode5, cutRoads });
   room.started = true;
   room.seats.forEach((s, i) => { if (!s.isAI && !s.connected) markAway(room, i, true); });
   broadcastState(room);
@@ -371,7 +372,7 @@ function onMessage(ws, m) {
     leaveCurrent(ws);
     const room = {
       code: newCode(), seats: [], hostToken: null, started: false, engine: null,
-      options: { special: true, speed: 900 }, chat: [], aiTimer: null, offerTimer: null, lastActive: Date.now(),
+      options: { winPoints: 10, mode5: 'paired', cutRoads: true, speed: 900 }, chat: [], aiTimer: null, offerTimer: null, lastActive: Date.now(),
     };
     rooms.set(room.code, room);
     const seat = addHuman(room, m.name, ws);
@@ -466,7 +467,9 @@ function onMessage(ws, m) {
     }
     case 'options':
       if (!isHost) return;
-      room.options.special = !!m.special;
+      if (Number.isInteger(Number(m.winPoints)) && m.winPoints >= 5 && m.winPoints <= 20) room.options.winPoints = Number(m.winPoints);
+      if (['paired', 'special', 'none'].includes(m.mode5)) room.options.mode5 = m.mode5;
+      room.options.cutRoads = m.cutRoads !== false;
       if ([300, 900, 1600].includes(Number(m.speed))) room.options.speed = Number(m.speed);
       break;
     case 'start':

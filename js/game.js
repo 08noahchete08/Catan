@@ -66,7 +66,12 @@ function newGame(setup, opts) {
       res: zeroRes(), dev: [], knights: 0, roads: 15, settlements: 5, cities: 4, roadLen: 0,
     })),
     bank, devDeck: deck,
-    special: cfg.special && opts.special !== false,
+    // Reglas configurables
+    winPoints: Math.min(20, Math.max(5, Number(opts.winPoints) || WIN_POINTS)),
+    cutRoads: opts.cutRoads !== false,
+    // Reglas para 5-6 jugadores: 'paired' (turnos en pareja, 2023), 'special' (fase especial clásica) o 'none'
+    mode5: n > 4 && ['paired', 'special', 'none'].includes(opts.mode5) ? opts.mode5 : (n > 4 && opts.mode5 == null ? 'paired' : 'none'),
+    partner: null, pairedActive: false,
     phase: 'setup-settlement',
     setupOrder: order.concat(order.slice().reverse()), setupIdx: 0,
     current: order[0], lastSettlement: null,
@@ -84,11 +89,17 @@ function newGame(setup, opts) {
 function isBot(pid) { return P(pid).isAI || P(pid).away; }
 function handSize(p) { return p.handCount != null ? p.handCount : total(p.res); }
 
+// Jugador que está jugando su turno (el principal, o su pareja en la fase de acción)
+function activePlayer() { return G.pairedActive ? G.partner : G.current; }
+
+// Jugador en pareja: el 3.º a la izquierda del jugador principal (enfrente, con 6)
+function partnerOf(pid) { return (pid + 3) % G.players.length; }
+
 function actor() {
   if (!G) return null;
   if (G.phase === 'discard') return G.discardQueue[0];
   if (G.phase === 'special-build') return G.specialBuilder;
-  return G.current;
+  return activePlayer();
 }
 
 function vp(pid, includeHidden = true) {
@@ -111,7 +122,8 @@ function give(pid, r, n) {
 }
 
 function canBuildNow(pid) {
-  return (G.phase === 'main' && pid === G.current) || (G.phase === 'special-build' && pid === G.specialBuilder);
+  return (G.phase === 'main' && pid === G.current) || (G.phase === 'special-build' && pid === G.specialBuilder) ||
+    (G.phase === 'paired' && pid === G.partner);
 }
 
 // ---------- validación de posiciones ----------
@@ -119,6 +131,16 @@ function validSettlementSpot(pid, vid, ignoreRoad) {
   const v = G.vertices[vid];
   if (v.building) return false;
   if (v.adj.some(a => G.vertices[a].building)) return false;
+  // Sin «cortar caminos»: no se puede construir donde pasa el camino de otro jugador
+  if (!G.cutRoads) {
+    const count = {};
+    for (const e of v.edges) {
+      const o = G.edges[e].road;
+      if (o === null || o === pid) continue;
+      count[o] = (count[o] || 0) + 1;
+      if (count[o] >= 2) return false;
+    }
+  }
   if (!ignoreRoad && !v.edges.some(e => G.edges[e].road === pid)) return false;
   return true;
 }
@@ -203,11 +225,11 @@ function buildRoad(pid, eid) {
     return true;
   }
   if (G.phase === 'road-building') {
-    if (pid !== G.current || !validRoadSpot(pid, eid)) return false;
+    if (pid !== activePlayer() || !validRoadSpot(pid, eid)) return false;
     placeRoad(pid, eid);
     G.freeRoads--;
     log(`${pname(pid)} construye un camino gratis.`);
-    if (G.freeRoads <= 0 || p.roads <= 0 || !roadSpots(pid).length) G.phase = 'main';
+    if (G.freeRoads <= 0 || p.roads <= 0 || !roadSpots(pid).length) G.phase = G.pairedActive ? 'paired' : 'main';
     updateLongestRoad();
     checkWin();
     return true;
@@ -327,8 +349,8 @@ function robberVictims(hid, pid) {
 function moveRobber(hid) {
   if (G.phase !== 'robber' || hid === G.robber || !G.hexes[hid]) return false;
   G.robber = hid;
-  log(`${pname(G.current)} mueve el ladrón a ${hexName(G.hexes[hid])}.`);
-  const victims = robberVictims(hid, G.current);
+  log(`${pname(activePlayer())} mueve el ladrón a ${hexName(G.hexes[hid])}.`);
+  const victims = robberVictims(hid, activePlayer());
   if (!victims.length) G.phase = G.afterRobber;
   else if (victims.length === 1) doSteal(victims[0]);
   else { G.stealCandidates = victims; G.phase = 'steal'; }
@@ -347,9 +369,10 @@ function doSteal(victim) {
   if (pool.length) {
     const r = pool[rand(pool.length)];
     P(victim).res[r]--;
-    P(G.current).res[r]++;
-    G.lastSteal = { thief: G.current, victim, res: r };
-    log(`${pname(G.current)} roba una carta a ${pname(victim)}.`);
+    const thief = activePlayer();
+    P(thief).res[r]++;
+    G.lastSteal = { thief, victim, res: r };
+    log(`${pname(thief)} roba una carta a ${pname(victim)}.`);
   }
   G.stealCandidates = [];
   G.phase = G.afterRobber;
@@ -357,9 +380,9 @@ function doSteal(victim) {
 
 // ---------- cartas de desarrollo ----------
 function playableDev(pid, type) {
-  if (!G || pid !== G.current || G.devPlayed || type === 'puntos') return false;
-  if (type === 'caballero') { if (G.phase !== 'roll' && G.phase !== 'main') return false; }
-  else if (G.phase !== 'main') return false;
+  if (!G || pid !== activePlayer() || G.devPlayed || type === 'puntos') return false;
+  if (type === 'caballero') { if (!['roll', 'main', 'paired'].includes(G.phase)) return false; }
+  else if (G.phase !== 'main' && G.phase !== 'paired') return false;
   return P(pid).dev.some(d => d.type === type && d.turn < G.turn);
 }
 
@@ -391,9 +414,9 @@ function playRoadBuilding(pid) {
 }
 
 function endRoadBuilding(pid) {
-  if (G.phase !== 'road-building' || pid !== G.current) return false;
+  if (G.phase !== 'road-building' || pid !== activePlayer()) return false;
   G.freeRoads = 0;
-  G.phase = 'main';
+  G.phase = G.pairedActive ? 'paired' : 'main';
   return true;
 }
 
@@ -433,7 +456,8 @@ function bankRate(pid, r) {
 }
 
 function bankTrade(pid, giveR, getR) {
-  if (G.phase !== 'main' || pid !== G.current || giveR === getR) return false;
+  const may = (G.phase === 'main' && pid === G.current) || (G.phase === 'paired' && pid === G.partner);
+  if (!may || giveR === getR) return false;
   const rate = bankRate(pid, giveR);
   if (P(pid).res[giveR] < rate || G.bank[getR] < 1) return false;
   P(pid).res[giveR] -= rate; G.bank[giveR] += rate;
@@ -529,10 +553,11 @@ function applyAction(pid, a) {
     case 'buy': return buyDev(pid);
     case 'end-turn': return endTurn(pid);
     case 'end-special': return endSpecial(pid);
+    case 'end-paired': return endPaired(pid);
     case 'end-roads': return endRoadBuilding(pid);
     case 'discard': return discard(pid, cleanRes(a.sel));
-    case 'robber': return pid === G.current && !!G.hexes[h] && moveRobber(h);
-    case 'steal': return pid === G.current && steal(toInt(a.p));
+    case 'robber': return pid === activePlayer() && !!G.hexes[h] && moveRobber(h);
+    case 'steal': return pid === activePlayer() && steal(toInt(a.p));
     case 'knight': return playKnight(pid);
     case 'roadbuilding': return playRoadBuilding(pid);
     case 'yop': return playAbundance(pid, a.r1, a.r2);
@@ -552,13 +577,29 @@ function endTurn(pid) {
   if (G.phase !== 'main' || pid !== G.current) return false;
   G.trade = null;
   log(`${pname(pid)} termina su turno.`);
-  if (G.special) {
+  if (G.mode5 === 'paired') {
+    // Turno en pareja: ahora actúa el jugador emparejado
+    G.partner = partnerOf(G.current);
+    G.pairedActive = true;
+    G.devPlayed = false;
+    G.aiTrades = 0;
+    G.phase = 'paired';
+    log(`🤝 Acción del jugador en pareja: ${pname(G.partner)}.`);
+    checkWin();
+  } else if (G.mode5 === 'special') {
     const n = G.players.length;
     G.specialQueue = [];
     for (let i = 1; i < n; i++) G.specialQueue.push((G.current + i) % n);
     G.phase = 'special-build';
     advanceSpecial();
   } else nextTurn();
+  return true;
+}
+
+function endPaired(pid) {
+  if (G.phase !== 'paired' || pid !== G.partner) return false;
+  log(`${pname(pid)} termina su acción.`);
+  nextTurn();
   return true;
 }
 
@@ -592,6 +633,8 @@ function nextTurn() {
   G.dice = null;
   G.devPlayed = false;
   G.specialBuilder = null;
+  G.partner = null;
+  G.pairedActive = false;
   G.aiTrades = 0;
   G.aiOffers = 0;
   G.trade = null;
@@ -601,10 +644,11 @@ function nextTurn() {
 function checkWin() {
   if (G.phase === 'gameover') return;
   if (G.phase === 'setup-settlement' || G.phase === 'setup-road') return;
-  if (vp(G.current) >= WIN_POINTS) {
-    G.winner = G.current;
+  const pid = activePlayer();
+  if (vp(pid) >= G.winPoints) {
+    G.winner = pid;
     G.phase = 'gameover';
-    log(`🏆 ¡${pname(G.current)} alcanza ${vp(G.current)} puntos y gana la partida!`);
+    log(`🏆 ¡${pname(pid)} alcanza ${vp(pid)} puntos y gana la partida!`);
   }
 }
 

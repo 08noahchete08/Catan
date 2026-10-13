@@ -2,6 +2,17 @@
 
 Juego completo para el navegador: partida **local** (contra la IA o pasándose el turno) y partida **online** para jugar con amigos desde casa.
 
+## Reglas configurables
+
+Al crear la partida (local u online) se puede elegir:
+
+- **Puntos para ganar:** de 5 a 20 (10 es lo normal).
+- **Regla para 5-6 jugadores:**
+  - **Turnos en pareja (oficial 2023):** tras cada turno, el jugador emparejado (el 3.º a la izquierda, enfrente con 6) puede construir, comerciar con el banco y jugar una carta, sin tirar dados ni comerciar con jugadores.
+  - **Fase especial de construcción (clásica):** tras cada turno, todos los demás pueden construir.
+  - **Sin regla extra.**
+- **Cortar caminos:** si se desactiva, no se puede construir un poblado donde pasa el camino de otro jugador.
+
 ## Jugar en local
 
 Abre `index.html` con doble clic. No necesitas instalar nada.

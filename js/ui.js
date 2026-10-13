@@ -45,6 +45,7 @@ function toast(msg) {
 
 // ============================ Partida local: configuración ============================
 function initSetup() {
+  $('#local-rules').addEventListener('change', renderLocalRules);
   $('#num-players').value = '6';
   $('#num-players').onchange = () => renderSetupRows();
   $('#btn-start').onclick = startGame;
@@ -74,8 +75,49 @@ function renderSetupRows(firstName) {
     sel.onchange = () => { sel.parentElement.querySelector('.swatch').style.background = sel.value; };
   });
   $('#board-note').innerHTML = boardNote(n);
-  $('#opt-special').disabled = n < 5;
-  $('#opt-special-row').classList.toggle('disabled', n < 5);
+  renderLocalRules();
+}
+
+function renderLocalRules() {
+  const n = +$('#num-players').value;
+  UI.localRules = $('#local-vp') ? readRules('local') : (UI.localRules || { ...DEFAULT_RULES });
+  $('#local-rules').innerHTML = rulesFields('local', UI.localRules, n, true);
+}
+
+// Reglas configurables (partida local y sala online)
+const MODE5_NAMES = {
+  paired: 'Turnos en pareja (oficial 2023)',
+  special: 'Fase especial de construcción (clásica)',
+  none: 'Sin regla extra',
+};
+const DEFAULT_RULES = { winPoints: 10, mode5: 'paired', cutRoads: true };
+
+function rulesFields(prefix, r, n, editable) {
+  const dis = editable ? '' : 'disabled';
+  const vpOpts = [];
+  for (let v = 5; v <= 20; v++) vpOpts.push(`<option value="${v}" ${v === r.winPoints ? 'selected' : ''}>${v} puntos${v === 10 ? ' (normal)' : ''}</option>`);
+  const longHint = n >= 5 && r.winPoints >= 13
+    ? '<p class="hint-warn">⚠️ Con 5-6 jugadores el tablero se llena: con tantos puntos la partida será larga y, sin poder cortar caminos, puede quedar sin salida.</p>' : '';
+  return `<div class="options rules-box">
+    <label>🏆 Puntos para ganar <select id="${prefix}-vp" ${dis}>${vpOpts.join('')}</select></label>
+    <label class="${n < 5 ? 'disabled' : ''}">👥 Regla para 5-6 jugadores
+      <select id="${prefix}-mode5" ${dis || (n < 5 ? 'disabled' : '')}>${Object.entries(MODE5_NAMES).map(([k, t]) =>
+        `<option value="${k}" ${k === r.mode5 ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
+    <p class="muted small rule-help">${n < 5 ? 'Solo se aplica con 5 o 6 jugadores.' : MODE5_HELP[r.mode5]}</p>
+    <label><input type="checkbox" id="${prefix}-cut" ${r.cutRoads ? 'checked' : ''} ${dis}> ✂️ Permitir cortar caminos ajenos con un poblado</label>
+    ${longHint}
+  </div>`;
+}
+
+const MODE5_HELP = {
+  paired: 'Tras cada turno, el jugador de enfrente (3.º a la izquierda) puede construir, comerciar con el banco y jugar una carta, sin tirar dados.',
+  special: 'Tras cada turno, todos los demás pueden construir o comprar cartas por orden, sin comerciar.',
+  none: 'Se juega igual que con 3-4 jugadores.',
+};
+
+function readRules(prefix) {
+  const vp = $(`#${prefix}-vp`), m = $(`#${prefix}-mode5`), c = $(`#${prefix}-cut`);
+  return vp ? { winPoints: +vp.value, mode5: m.value, cutRoads: c.checked } : { ...DEFAULT_RULES };
 }
 
 function boardNote(n) {
@@ -98,7 +140,7 @@ function startGame() {
   UI.speed = +$('#opt-speed').value;
   UI.online = false;
   stopLocalAI();
-  newGame(setup, { special: $('#opt-special').checked });
+  newGame(setup, readRules('local'));
   UI.mode = null; UI.viewer = null; UI.winnerShown = false;
   closeModal();
   showScreen('game');
@@ -231,6 +273,7 @@ function renderBanner() {
           : `${who}: construye, comercia o termina el turno`;
         break;
       case 'special-build': txt = `🔨 Fase especial de construcción: ${who}`; break;
+      case 'paired': txt = `🤝 Acción en pareja: ${who} puede construir, comerciar con el banco y jugar una carta`; break;
     }
     if (bot) txt += ' <span class="thinking">🤖 pensando…</span>';
     else if (!mine && UI.online) txt += ' <span class="thinking">⏳</span>';
@@ -242,7 +285,7 @@ function renderBanner() {
 function renderPlayers() {
   const view = viewerId();
   const a = actor();
-  $('#players').innerHTML = `<h3>Jugadores <small>Meta: ${WIN_POINTS} puntos</small></h3>` + G.players.map(p => {
+  $('#players').innerHTML = `<h3>Jugadores <small>Meta: ${G.winPoints} puntos</small></h3>` + G.players.map(p => {
     const own = p.id === view || G.phase === 'gameover';
     const pts = vp(p.id, own);
     const hidden = own ? p.dev.filter(d => d.type === 'puntos').length : 0;
@@ -255,7 +298,8 @@ function renderPlayers() {
           ${UI.online && p.id === NET.seat ? '<span class="tag me">tú</span>' : ''}
           ${p.isAI ? '<span class="tag">IA</span>' : ''}
           ${p.away ? '<span class="tag off" title="Desconectado: la IA juega en su lugar">IA temporal</span>' : offline ? '<span class="tag off">desconectado</span>' : ''}
-          ${p.id === G.current ? '<span class="tag turn">turno</span>' : ''}</div>
+          ${p.id === G.current ? '<span class="tag turn">turno</span>' : ''}
+          ${G.mode5 === 'paired' && G.turn && G.phase !== 'gameover' && p.id === partnerOf(G.current) ? '<span class="tag pair" title="Jugador en pareja: tendrá una fase de acción al terminar el turno">pareja</span>' : ''}</div>
         <div class="pstats">
           <span title="Cartas de recurso">🃏 ${handSize(p)}</span>
           <span title="Cartas de desarrollo">📜 ${p.dev.length}</span>
@@ -280,7 +324,8 @@ function renderTurnPanel() {
     ? `<div class="dice ${G.dice[0] + G.dice[1] === 7 ? 'seven' : ''}">${dieHtml(G.dice[0], roll)}${dieHtml(G.dice[1], roll + ' second')}<b>${G.dice[0] + G.dice[1]}</b></div>`
     : `<div class="dice empty">${dieHtml(0, '')}${dieHtml(0, '')}<b>–</b></div>`;
   let html = `<div class="turn-head"><div><div class="turn-num">${G.turn ? 'Turno ' + G.turn : 'Colocación inicial'}</div>
-    <div class="turn-who">${G.phase === 'gameover' ? 'Partida terminada' : 'Juega ' + pname(G.current)}</div></div>${dice}</div>`;
+    <div class="turn-who">${G.phase === 'gameover' ? 'Partida terminada' : 'Juega ' + pname(G.current)}
+      ${G.pairedActive ? `<div class="small muted">🤝 Acción de ${pname(G.partner)}</div>` : ''}</div></div>${dice}</div>`;
 
   if (G.phase === 'gameover') {
     html += `<button class="primary wide" data-act="show-winner">🏆 Ver resultados</button>`;
@@ -307,6 +352,12 @@ function renderTurnPanel() {
           <button data-act="open-bank">🏦 Banco / puertos</button>
           <button data-act="open-trade">🤝 Comerciar${G.trade ? ' •' : ''}</button></div>
           <button class="primary wide" data-act="end-turn">⏭️ Terminar turno</button>`;
+        break;
+      case 'paired':
+        html += `<div class="info">🤝 Es tu acción en pareja: puedes construir, comerciar con el banco y jugar una carta de desarrollo (no se tiran dados ni se comercia con jugadores).</div>`;
+        html += buildButtons(a);
+        html += `<button class="wide" data-act="open-bank">🏦 Banco / puertos</button>
+          <button class="primary wide" data-act="end-paired">✔️ Terminar acción</button>`;
         break;
       case 'special-build':
         html += `<div class="info">🔨 Fase especial de construcción: puedes construir o comprar cartas (sin comerciar).</div>`;
@@ -402,7 +453,9 @@ function syncModals() {
     return;
   }
   if (UI.modal && /^(discard|steal|offer|winner|trade-resp)/.test(UI.modal)) closeModal();
-  if (['bank', 'trade', 'yop', 'mono'].includes(UI.modal) && !(G.phase === 'main' && a === G.current)) closeModal();
+  const myTurn = (G.phase === 'main' && a === G.current) || (G.phase === 'paired' && a === G.partner);
+  if (['bank', 'yop', 'mono'].includes(UI.modal) && !myTurn) closeModal();
+  if (UI.modal === 'trade' && !(G.phase === 'main' && a === G.current)) closeModal();
   if (UI.modal === 'trade') renderTradeModal();
   if (UI.modal === 'bank') renderBankModal();
 }
@@ -445,7 +498,7 @@ function openBank() {
   renderBankModal();
 }
 function renderBankModal() {
-  const a = G.current, p = P(a), s = UI.bank;
+  const a = activePlayer(), p = P(a), s = UI.bank;
   if (s.give && p.res[s.give] < bankRate(a, s.give)) s.give = null;
   const rate = s.give ? bankRate(a, s.give) : null;
   const ok = s.give && s.get && s.give !== s.get && G.bank[s.get] > 0;
@@ -561,7 +614,7 @@ function showWinner() {
 // --- Reglas ---
 function showRules() {
   openModal('rules', `<h2>📖 Reglas rápidas</h2><div class="rules">
-    <p><b>Objetivo:</b> ser el primero en alcanzar <b>${WIN_POINTS} puntos de victoria</b> durante tu turno.</p>
+    <p><b>Objetivo:</b> ser el primero en alcanzar <b>${G ? G.winPoints : WIN_POINTS} puntos de victoria</b> (10 normalmente; se puede cambiar al crear la partida).</p>
     <h3>Preparación</h3>
     <p>Cada jugador coloca un poblado y un camino; después, en orden inverso, un segundo poblado y camino. El segundo poblado produce una carta de cada terreno adyacente.</p>
     <h3>Tu turno</h3>
@@ -577,7 +630,11 @@ function showRules() {
     <h3>Premios (+2 puntos)</h3>
     <p>🛣️ <b>Gran Ruta Comercial:</b> el camino continuo más largo (mínimo 5). 🛡️ <b>Gran Ejército:</b> el primero con 3 caballeros jugados, o quien supere al actual.</p>
     <h3>Ampliación 5-6 jugadores</h3>
-    <p>Tablero de 30 hexágonos (2 desiertos), 11 puertos, más cartas. <b>Fase especial de construcción:</b> al terminar el turno de un jugador, los demás, por orden, pueden construir o comprar cartas de desarrollo (pero no comerciar ni jugar cartas).</p>
+    <p>Tablero de 30 hexágonos (2 desiertos), 11 puertos y más cartas. Se elige una regla al crear la partida:</p>
+    <ul><li><b>Turnos en pareja (oficial 2023):</b> tras el turno de un jugador, el jugador emparejado (el 3.º a su izquierda, enfrente con 6) tiene una fase de acción: puede construir, comerciar con el banco y jugar una carta de desarrollo, pero no tira los dados ni comercia con otros jugadores.</li>
+    <li><b>Fase especial de construcción (clásica):</b> tras cada turno, todos los demás pueden construir o comprar cartas, por orden.</li></ul>
+    <h3>Opciones</h3>
+    <p><b>Cortar caminos:</b> normalmente un poblado construido en mitad del camino de otro jugador lo corta (y puede quitarle la Gran Ruta). Si se desactiva, no se puede construir donde pasa el camino de otro jugador.</p>
     <h3>Partida online</h3>
     <p>Crea una sala y comparte el código o el enlace. Si alguien se desconecta, la IA juega en su lugar hasta que vuelva a entrar.</p>
     </div><div class="modal-foot"><button class="primary" data-act="close">Entendido</button></div>`);
@@ -620,6 +677,7 @@ function onClick(ev) {
     case 'buy': send({ type: 'buy' }); break;
     case 'end-turn': send({ type: 'end-turn' }); break;
     case 'end-special': send({ type: 'end-special' }); break;
+    case 'end-paired': send({ type: 'end-paired' }); break;
     case 'end-roads': send({ type: 'end-roads' }); break;
     case 'play-dev': playDevUI(t.dataset.type); break;
     case 'reopen': UI.modal = null; syncModals(); break;

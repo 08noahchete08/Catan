@@ -243,13 +243,12 @@ function renderLobby() {
   const n = L.seats.length;
   const speeds = [[300, 'Rápida'], [900, 'Normal'], [1600, 'Lenta']];
   $('#lobby-note').innerHTML = boardNote(Math.max(n, 3));
-  $('#lobby-controls').innerHTML = isHost
-    ? `<div class="options">
-        <button data-act="lobby-add-ai" ${n >= 6 ? 'disabled' : ''}>🤖 Añadir jugador IA</button>
-        <label class="${n < 5 ? 'disabled' : ''}"><input type="checkbox" id="lobby-special" ${L.options.special ? 'checked' : ''} ${n < 5 ? 'disabled' : ''}> Fase especial de construcción (5-6 jugadores)</label>
-        <label>Velocidad de la IA <select id="lobby-speed">${speeds.map(([v, t]) => `<option value="${v}" ${L.options.speed === v ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
-      </div>`
-    : `<p class="muted small">Fase especial: ${L.options.special ? 'sí' : 'no'} · Velocidad de la IA: ${(speeds.find(s => s[0] === L.options.speed) || speeds[1])[1]}</p>`;
+  $('#lobby-controls').innerHTML =
+    (isHost ? `<button class="wide" data-act="lobby-add-ai" ${n >= 6 ? 'disabled' : ''}>🤖 Añadir jugador IA</button>` : '') +
+    rulesFields('lobby', L.options, n, isHost) +
+    `<div class="options"><label>Velocidad de la IA <select id="lobby-speed" ${isHost ? '' : 'disabled'}>${speeds.map(([v, t]) =>
+      `<option value="${v}" ${L.options.speed === v ? 'selected' : ''}>${t}</option>`).join('')}</select></label></div>` +
+    (isHost ? '' : '<p class="muted small">Solo el anfitrión puede cambiar las reglas.</p>');
   $('#lobby-start-wrap').innerHTML = isHost
     ? `<button class="primary big" data-act="lobby-start" ${n < 3 ? 'disabled' : ''}>▶ Comenzar partida</button>`
     : '<span class="muted">Esperando a que el anfitrión comience…</span>';
@@ -259,8 +258,8 @@ function renderLobby() {
 
 function onNetChange(e) {
   if (e.target.id === 'lobby-color') wsSend({ t: 'color', color: e.target.value });
-  else if (e.target.id === 'lobby-special' || e.target.id === 'lobby-speed') {
-    wsSend({ t: 'options', special: $('#lobby-special').checked, speed: +$('#lobby-speed').value });
+  else if (['lobby-vp', 'lobby-mode5', 'lobby-cut', 'lobby-speed'].includes(e.target.id)) {
+    wsSend({ t: 'options', ...readRules('lobby'), speed: +$('#lobby-speed').value });
   }
 }
 
