@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Colonos de Catán</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+  <!-- Menú de inicio -->
+  <div id="menu-screen" class="screen">
+    <div class="menu-card">
+      <div class="menu-hero">
+        <div class="hero-hexes" aria-hidden="true">
+          <span style="--c:#3f7d3a">🌲</span><span style="--c:#c8693c">🧱</span><span style="--c:#a5cf5f">🐑</span>
+          <span style="--c:#e9c046">🌾</span><span style="--c:#8d939c">⛰️</span>
+        </div>
+        <h1>Los Colonos de Catán</h1>
+        <p class="subtitle">Comercia, construye y coloniza · de 3 a 6 jugadores</p>
+      </div>
+
+      <label class="field">
+        <span>Tu nombre</span>
+        <input id="menu-name" maxlength="14" placeholder="Escribe tu nombre" autocomplete="nickname">
+      </label>
+
+      <div class="menu-grid">
+        <button id="btn-create" class="menu-btn">
+          <span class="mi">🌐</span><b>Crear partida online</b>
+          <small>Invita a tus amigos con un código o un enlace</small>
+        </button>
+        <button id="btn-local" class="menu-btn">
+          <span class="mi">🎲</span><b>Partida local</b>
+          <small>En este equipo, contra la IA o pasándose el turno</small>
+        </button>
+      </div>
+
+      <div id="join-box" class="join-box">
+        <b>🔗 Unirse a una partida</b>
+        <div class="join-row">
+          <input id="join-code" maxlength="4" placeholder="CÓDIGO" autocomplete="off" aria-label="Código de la sala">
+          <button id="btn-join" class="primary">Unirse</button>
+        </div>
+      </div>
+
+      <p id="online-note" class="note hidden"></p>
+
+      <div class="menu-foot">
+        <button id="btn-rules-menu">📖 Reglas</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Partida local: configuración -->
+  <div id="setup-screen" class="screen hidden">
+    <div class="setup-card">
+      <h1>🎲 Partida local</h1>
+      <p class="subtitle">Juega en este equipo contra la IA o con amigos turnándose</p>
+
+      <div class="setup-row">
+        <label for="num-players">Número de jugadores</label>
+        <select id="num-players">
+          <option value="3">3</option><option value="4">4</option>
+          <option value="5">5</option><option value="6">6</option>
+        </select>
+      </div>
+      <p id="board-note" class="note"></p>
+
+      <div id="player-rows"></div>
+
+      <div class="options">
+        <label id="opt-special-row"><input type="checkbox" id="opt-special" checked> Fase especial de construcción (5-6 jugadores)</label>
+        <label>Velocidad de la IA
+          <select id="opt-speed">
+            <option value="200">Rápida</option>
+            <option value="650" selected>Normal</option>
+            <option value="1200">Lenta</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="setup-buttons">
+        <button id="btn-back-setup">← Volver</button>
+        <button id="btn-start" class="primary big">Comenzar partida</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Sala de espera online -->
+  <div id="lobby-screen" class="screen hidden">
+    <div class="setup-card lobby-card">
+      <div class="lobby-head">
+        <div>
+          <div class="muted small">Código de la sala</div>
+          <div id="lobby-code" class="room-code"></div>
+        </div>
+        <button data-act="copy-link" class="primary">📋 Copiar enlace</button>
+      </div>
+      <p class="muted small">Comparte el código o este enlace: <span id="lobby-link" class="link-text"></span></p>
+
+      <div id="lobby-seats"></div>
+      <p id="lobby-note" class="note"></p>
+      <div id="lobby-controls"></div>
+      <p id="lobby-hint" class="muted small"></p>
+
+      <div class="setup-buttons">
+        <button data-act="lobby-leave">← Salir</button>
+        <span id="lobby-start-wrap"></span>
+      </div>
+
+      <div class="lobby-chat">
+        <h3>💬 Chat</h3>
+        <div class="chat-list"></div>
+        <form id="lobby-chat-form" class="chat-form">
+          <input maxlength="200" placeholder="Escribe un mensaje…" aria-label="Mensaje">
+          <button type="submit">Enviar</button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Partida -->
+  <div id="game" class="hidden">
+    <header>
+      <div class="logo">⛵ Catán <span id="room-tag"></span></div>
+      <div class="header-buttons">
+        <button data-act="rules">📖 Reglas</button>
+        <button data-act="menu">🏠 Menú</button>
+      </div>
+    </header>
+    <main>
+      <section id="board-wrap">
+        <div id="banner"></div>
+        <svg id="board" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet"></svg>
+      </section>
+      <aside id="sidebar">
+        <div id="players" class="panel"></div>
+        <div id="turn-panel" class="panel"></div>
+        <div id="hand" class="panel"></div>
+        <div id="chat-panel" class="panel hidden">
+          <h3>💬 Chat</h3>
+          <div class="chat-list"></div>
+          <form id="chat-form" class="chat-form">
+            <input maxlength="200" placeholder="Escribe un mensaje…" aria-label="Mensaje">
+            <button type="submit">Enviar</button>
+          </form>
+        </div>
+        <div id="log" class="panel"><h3>Registro</h3><div id="log-list"></div></div>
+      </aside>
+    </main>
+  </div>
+
+  <div id="modal-backdrop" class="hidden"><div id="modal" role="dialog" aria-modal="true"></div></div>
+  <div id="toast" role="status"></div>
+
+  <script src="js/board.js"></script>
+  <script src="js/game.js"></script>
+  <script src="js/ai.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/net.js"></script>
+</body>
+</html>
