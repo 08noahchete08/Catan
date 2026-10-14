@@ -223,9 +223,10 @@ button.build.active { background: #3b5a1f; border-color: var(--ok); }
 .token-g.robbed { opacity: .55; }
 .dock { stroke: #6b4f2a; stroke-width: 6; stroke-linecap: round; }
 .dock-planks { stroke: #b48a52; stroke-width: 4; stroke-dasharray: 2 2.5; }
-.port-bg { fill: #f6ecd2; stroke: #8b6b3d; stroke-width: 3; filter: url(#shadow); }
+.port-sign { fill: #f6ecd2; stroke-width: 2.5; filter: url(#shadow); }
+.port, .bollard { pointer-events: auto; }
 .port-icon { font-size: 13px; text-anchor: middle; dominant-baseline: middle; }
-.port-rate { font-size: 10px; font-weight: 800; text-anchor: middle; fill: #3b2a12; }
+.port-rate { font-size: 11px; font-weight: 900; text-anchor: middle; fill: #3b2a12; dominant-baseline: middle; }
 .road-shadow { stroke: rgba(0,0,0,.35); stroke-width: 9; stroke-linecap: round; }
 .road-side { stroke-width: 9; stroke-linecap: round; }
 .road { stroke-width: 7; stroke-linecap: round; }

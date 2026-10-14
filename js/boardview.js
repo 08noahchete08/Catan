@@ -202,6 +202,61 @@ function citySvg(x, y, c, metro) {
   </g>`;
 }
 
+// Muelle de madera desde las dos intersecciones del puerto hasta el letrero.
+// Dibuja las pasarelas en «out» y devuelve los bolardos y el letrero (van encima).
+function drawPier(p, out, is3d) {
+  const generic = p.type === 'generic';
+  const col = generic ? '#d9c08a' : RES_INFO[p.type].color;
+  const [px, py] = pr(p.x, p.y);
+  const depth = is3d ? 5 : 2, hw = 4.5;
+  let top = '';
+  for (const vid of G.edges[p.edge].v) {
+    const v = G.vertices[vid];
+    const [vx, vy] = pr(v.x, v.y);
+    const ex = px + (vx - px) * 0.28, ey = py + (vy - py) * 0.28;
+    const dx = ex - vx, dy = ey - vy, len = Math.hypot(dx, dy) || 1;
+    const nx = -dy / len * hw, ny = dx / len * hw;
+    const deck = [[vx + nx, vy + ny], [ex + nx, ey + ny], [ex - nx, ey - ny], [vx - nx, vy - ny]];
+    const down = q => [q[0], q[1] + depth];
+    // Postes bajo la pasarela
+    for (const t of [0.45, 1]) {
+      const qx = vx + dx * t, qy = vy + dy * t;
+      out.push(`<rect x="${f1(qx - 1.6)}" y="${f1(qy)}" width="3.2" height="${depth + 7}" fill="#3d2a16"/>`);
+    }
+    // Canto y tablero con tablones
+    out.push(`<polygon points="${polyStr([deck[3], deck[2], down(deck[2]), down(deck[3])])}" fill="#5c4022"/>
+      <polygon points="${polyStr([deck[0], deck[1], down(deck[1]), down(deck[0])])}" fill="#6e4d2a"/>
+      <polygon points="${polyStr(deck)}" fill="#b98c55" stroke="#4a331b" stroke-width=".8"/>`);
+    const planks = Math.max(2, Math.floor(len / 5));
+    for (let i = 1; i < planks; i++) {
+      const t = i / planks, qx = vx + dx * t, qy = vy + dy * t;
+      out.push(`<line x1="${f1(qx + nx)}" y1="${f1(qy + ny)}" x2="${f1(qx - nx)}" y2="${f1(qy - ny)}" stroke="#7a5630" stroke-width=".9"/>`);
+    }
+    // Bolardo del color del puerto junto a la intersección
+    const bx = vx + dx * 0.16, by = vy + dy * 0.16;
+    top += `<g transform="translate(${f1(bx)},${f1(by)})" class="bollard">
+      <ellipse cy="2" rx="4.5" ry="2" fill="rgba(0,0,0,.35)"/>
+      <rect x="-3.2" y="-7" width="6.4" height="9" rx="1.5" fill="${shade(col, -.25)}" stroke="#1e1408" stroke-width=".8"/>
+      <ellipse cy="-7" rx="3.2" ry="1.6" fill="${shade(col, .2)}" stroke="#1e1408" stroke-width=".6"/>
+    </g>`;
+  }
+  // Letrero vertical sobre un poste
+  const label = generic ? '3:1' : '2:1';
+  const icon = generic ? '⚓' : RES_INFO[p.type].icon;
+  const title = generic ? 'Puerto 3:1: cambia 3 cartas iguales por 1' : `Puerto 2:1 de ${RES_INFO[p.type].name.toLowerCase()}`;
+  top += `<g class="port" transform="translate(${f1(px)},${f1(py)})">
+    <ellipse cy="3" rx="14" ry="${is3d ? 4 : 3}" fill="rgba(0,0,0,.3)"/>
+    <rect x="-2" y="-16" width="4" height="19" fill="#4a331b"/>
+    <rect x="-17" y="-38" width="38" height="24" rx="4" fill="#5c4022"/>
+    <rect x="-19" y="-40" width="38" height="24" rx="4" class="port-sign" style="stroke:${col}"/>
+    <rect x="-19" y="-40" width="38" height="6" rx="3" fill="${col}" opacity=".9"/>
+    <text x="-8" y="-24" class="port-icon">${icon}</text>
+    <text x="8" y="-23" class="port-rate">${label}</text>
+    <title>${title}. Se usa con un poblado o ciudad en las intersecciones marcadas con postes de este color.</title>
+  </g>`;
+  return top;
+}
+
 function shipSvg(x, y, c, cls = 'piece') {
   return `<g transform="translate(${f1(x)},${f1(y)}) scale(1.1)" class="${cls}">
     <ellipse cy="5" rx="12" ry="3" fill="rgba(0,0,0,.3)"/>
@@ -325,25 +380,6 @@ function renderBoard() {
   const [bx, by, bw, bh] = VIEW.box;
   out.push(`<rect x="${f1(bx)}" y="${f1(by)}" width="${f1(bw)}" height="${f1(bh)}" fill="url(#waves)"/>`);
 
-  // --- Puertos: muelle de madera hacia la costa ---
-  for (const p of G.ports) {
-    const [px, py] = pr(p.x, p.y);
-    for (const vid of G.edges[p.edge].v) {
-      const v = G.vertices[vid];
-      const [vx, vy] = pr(v.x, v.y);
-      out.push(`<line x1="${f1(vx)}" y1="${f1(vy)}" x2="${f1(px)}" y2="${f1(py)}" class="dock"/>
-        <line x1="${f1(vx)}" y1="${f1(vy)}" x2="${f1(px)}" y2="${f1(py)}" class="dock-planks"/>`);
-    }
-    const generic = p.type === 'generic';
-    out.push(`<g class="port" transform="translate(${f1(px)},${f1(py)})">
-      <ellipse cy="${is3d ? 15 : 17}" rx="16" ry="${is3d ? 4 : 3}" fill="rgba(0,0,0,.25)"/>
-      <circle r="18" class="port-bg" ${generic ? '' : `style="stroke:${RES_INFO[p.type].color}"`}/>
-      <text y="-2" class="port-icon">${generic ? '⚓' : RES_INFO[p.type].icon}</text>
-      <text y="12" class="port-rate">${generic ? '3:1' : '2:1'}</text>
-      <title>${generic ? 'Puerto 3:1: cambia 3 cartas iguales por 1' : `Puerto 2:1 de ${RES_INFO[p.type].name.toLowerCase()}`}</title>
-    </g>`);
-  }
-
   const byY = G.hexes.filter(h => h.terrain !== 'mar').sort((p, q) => p.y - q.y);
   for (const h of G.hexes) {
     if (h.terrain !== 'mar') continue;
@@ -361,6 +397,10 @@ function renderBoard() {
     }
     out.push(`<polygon points="${polyStr(c)}" fill="url(#sandTop)"/>`);
   }
+
+  // --- Muelles de los puertos (sobre la base, para que no los tape la isla) ---
+  const portSigns = [];
+  for (const p of G.ports) portSigns.push(drawPier(p, out, is3d));
 
   // --- Superficie de cada terreno ---
   for (const h of byY) {
@@ -431,6 +471,9 @@ function renderBoard() {
       if (h.conquered) out.push(`<polygon points="${polyStr(hexCorners(h.x, h.y, HEX_R - 5))}" class="conquered"/>`);
     }
   }
+
+  // --- Bolardos y letreros de los puertos ---
+  portSigns.forEach(ps => out.push(ps));
 
   // --- Caminos ---
   for (const e of G.edges) {
