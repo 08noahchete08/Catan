@@ -326,7 +326,7 @@ function renderBoard() {
   }
   if (hT) {
     for (const h of G.hexes) {
-      if (h.id === G.robber) continue;
+      if (!robberAllowed(h.id, a)) continue;
       out.push(`<polygon points="${polyStr(hexCorners(h.x, h.y, HEX_R - 4))}" class="hex-hit" data-h="${h.id}"><title>${hexName(h)}</title></polygon>`);
     }
   }

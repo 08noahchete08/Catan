@@ -72,6 +72,7 @@ function newGame(setup, opts) {
     // Reglas para 5-6 jugadores: 'paired' (turnos en pareja, 2023), 'special' (fase especial clásica) o 'none'
     mode5: n > 4 && ['paired', 'special', 'none'].includes(opts.mode5) ? opts.mode5 : (n > 4 && opts.mode5 == null ? 'paired' : 'none'),
     partner: null, pairedActive: false,
+    variants: cleanVariants(opts.variants), harborHolder: null, eventDeck: null, newYearAt: 0, epidemic: false, lastEvent: null,
     phase: 'setup-settlement',
     setupOrder: order.concat(order.slice().reverse()), setupIdx: 0,
     current: order[0], lastSettlement: null,
@@ -107,6 +108,7 @@ function vp(pid, includeHidden = true) {
   for (const v of G.vertices) if (v.building && v.building.owner === pid) s += v.building.type === 'ciudad' ? 2 : 1;
   if (G.longestHolder === pid) s += 2;
   if (G.armyHolder === pid) s += 2;
+  if (G.harborHolder === pid) s += 2;
   if (includeHidden) s += P(pid).dev.filter(d => d.type === 'puntos').length;
   return s;
 }
@@ -178,6 +180,7 @@ function buildSettlement(pid, vid) {
   v.building = { owner: pid, type: 'poblado' };
   p.settlements--;
   log(`${pname(pid)} construye un poblado${v.port ? ' en un puerto' : ''}.`);
+  updateHarbormaster();
   if (setup) {
     G.lastSettlement = vid;
     if (G.setupIdx >= G.players.length) {
@@ -204,6 +207,7 @@ function buildCity(pid, vid) {
   v.building.type = 'ciudad';
   p.cities--; p.settlements++;
   log(`${pname(pid)} mejora un poblado a ciudad.`);
+  updateHarbormaster();
   checkWin();
   return true;
 }
@@ -269,10 +273,17 @@ function advanceSetup() {
 // ---------- dados, producción y ladrón ----------
 function rollDice() {
   if (G.phase !== 'roll') return false;
-  const d = [rand(6) + 1, rand(6) + 1];
+  let d = [rand(6) + 1, rand(6) + 1], event = null;
+  if (G.variants.eventCards) {
+    const drawn = drawEventCard();
+    d = drawn.dice;
+    event = drawn.card.ev;
+  }
   const s = d[0] + d[1];
   G.dice = d;
-  log(`${pname(G.current)} tira los dados: <b>${s}</b>.`);
+  G.lastEvent = null;
+  log(`${pname(G.current)} ${G.variants.eventCards ? 'roba una carta de eventos' : 'tira los dados'}: <b>${s}</b>.`);
+  if (event) applyEvent(event);
   if (s === 7) {
     const n = G.players.length;
     G.discardQueue = [];
@@ -287,6 +298,7 @@ function rollDice() {
     if (G.discardQueue.length) log(`Los jugadores con más de 7 cartas deben descartar la mitad.`);
   } else {
     produce(s);
+    G.epidemic = false;
     G.phase = 'main';
   }
   return true;
@@ -301,7 +313,7 @@ function produce(n) {
     if (!r) continue;
     for (const vid of h.vertices) {
       const b = G.vertices[vid].building;
-      if (b) demand[r][b.owner] = (demand[r][b.owner] || 0) + (b.type === 'ciudad' ? 2 : 1);
+      if (b) demand[r][b.owner] = (demand[r][b.owner] || 0) + (b.type === 'ciudad' && !G.epidemic ? 2 : 1);
     }
   }
   const gains = G.players.map(() => zeroRes());
@@ -347,7 +359,7 @@ function robberVictims(hid, pid) {
 }
 
 function moveRobber(hid) {
-  if (G.phase !== 'robber' || hid === G.robber || !G.hexes[hid]) return false;
+  if (G.phase !== 'robber' || !robberAllowed(hid, activePlayer())) return false;
   G.robber = hid;
   log(`${pname(activePlayer())} mueve el ladrón a ${hexName(G.hexes[hid])}.`);
   const victims = robberVictims(hid, activePlayer());
@@ -639,6 +651,26 @@ function nextTurn() {
   G.aiOffers = 0;
   G.trade = null;
   checkWin();
+  checkDeadlock();
+}
+
+// Con muchos puntos para ganar el tablero puede llenarse sin que nadie llegue.
+// Si ya nadie puede conseguir más puntos, gana quien tenga más.
+function canGainPoints(pid) {
+  const p = P(pid);
+  if (G.devDeck.length) return true;
+  if (p.cities > 0 && citySpots(pid).length) return true;
+  if (p.settlements > 0 && (settlementSpots(pid, false).length || AI.roadTarget(pid))) return true;
+  return false;
+}
+
+function checkDeadlock() {
+  if (G.phase === 'gameover' || G.players.some(p => canGainPoints(p.id))) return;
+  const best = Math.max(...G.players.map(p => vp(p.id)));
+  const winner = G.players.find(p => vp(p.id) === best).id;
+  G.winner = winner;
+  G.phase = 'gameover';
+  log(`🔒 <b>Partida bloqueada:</b> ya nadie puede conseguir más puntos. Gana ${pname(winner)} con ${best} puntos.`);
 }
 
 function checkWin() {

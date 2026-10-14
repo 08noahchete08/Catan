@@ -129,7 +129,7 @@ const AI = {
   chooseRobberHex(pid) {
     let best = null, bs = -Infinity;
     for (const h of G.hexes) {
-      if (h.id === G.robber) continue;
+      if (!robberAllowed(h.id, pid)) continue;
       let s = Math.random() * 0.2;
       for (const vid of h.vertices) {
         const b = G.vertices[vid].building;
@@ -357,7 +357,7 @@ const AI = {
         discard(pid, sel);
         break;
       }
-      case 'robber': moveRobber(G.hexes.find(h => h.id !== G.robber).id); break;
+      case 'robber': moveRobber(G.hexes.find(h => robberAllowed(h.id, pid)).id); break;
       case 'steal': steal(G.stealCandidates[0]); break;
       case 'road-building': endRoadBuilding(pid); break;
       case 'main': endTurn(pid); break;

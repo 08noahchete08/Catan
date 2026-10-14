@@ -45,7 +45,7 @@ function toast(msg) {
 
 // ============================ Partida local: configuración ============================
 function initSetup() {
-  $('#local-rules').addEventListener('change', renderLocalRules);
+  $('#local-rules').addEventListener('change', e => { exclusiveExpansions(e); renderLocalRules(); });
   $('#num-players').value = '6';
   $('#num-players').onchange = () => renderSetupRows();
   $('#btn-start').onclick = startGame;
@@ -90,22 +90,45 @@ const MODE5_NAMES = {
   special: 'Fase especial de construcción (clásica)',
   none: 'Sin regla extra',
 };
-const DEFAULT_RULES = { winPoints: 10, mode5: 'paired', cutRoads: true };
+const DEFAULT_RULES = { winPoints: 10, mode5: 'paired', cutRoads: true, variants: {}, expansion: 'none' };
+
+// Interruptor on/off accesible (casilla con aspecto de interruptor)
+function toggleHtml(id, icon, title, desc, on, disabled, extra = '') {
+  return `<label class="toggle ${disabled ? 'off' : ''}">
+    <span class="toggle-text"><b>${icon} ${title}${extra}</b>${desc ? `<small>${desc}</small>` : ''}</span>
+    <input type="checkbox" role="switch" id="${id}" ${on ? 'checked' : ''} ${disabled ? 'disabled' : ''}>
+    <span class="toggle-track" aria-hidden="true"></span>
+  </label>`;
+}
+
+// Expansiones grandes (excluyentes entre sí)
+const EXPANSIONS = {
+  seafarers: { name: 'Navegantes de Catán', icon: '⛵', desc: 'Barcos, islas, campos de oro y el pirata.', ready: false },
+  ck: { name: 'Ciudades y Caballeros', icon: '🏰', desc: 'Mercancías, caballeros, bárbaros y mejoras de ciudad.', ready: false },
+  tb: { name: 'Mercaderes y Bárbaros', icon: '🐪', desc: 'Pescadores, ríos, caravanas y ataque bárbaro.', ready: false },
+};
 
 function rulesFields(prefix, r, n, editable) {
-  const dis = editable ? '' : 'disabled';
+  const dis = !editable;
   const vpOpts = [];
   for (let v = 5; v <= 20; v++) vpOpts.push(`<option value="${v}" ${v === r.winPoints ? 'selected' : ''}>${v} puntos${v === 10 ? ' (normal)' : ''}</option>`);
   const longHint = n >= 5 && r.winPoints >= 13
-    ? '<p class="hint-warn">⚠️ Con 5-6 jugadores el tablero se llena: con tantos puntos la partida será larga y, sin poder cortar caminos, puede quedar sin salida.</p>' : '';
-  return `<div class="options rules-box">
-    <label>🏆 Puntos para ganar <select id="${prefix}-vp" ${dis}>${vpOpts.join('')}</select></label>
-    <label class="${n < 5 ? 'disabled' : ''}">👥 Regla para 5-6 jugadores
-      <select id="${prefix}-mode5" ${dis || (n < 5 ? 'disabled' : '')}>${Object.entries(MODE5_NAMES).map(([k, t]) =>
+    ? '<p class="hint-warn">⚠️ Con 5-6 jugadores el tablero se llena: con tantos puntos la partida será larga. Si nadie puede conseguir más puntos, gana quien más tenga.</p>' : '';
+  const variants = r.variants || {};
+  return `<div class="rules-box">
+    <div class="rules-section">Partida</div>
+    <label class="field-row">🏆 Puntos para ganar <select id="${prefix}-vp" ${dis ? 'disabled' : ''}>${vpOpts.join('')}</select></label>
+    <label class="field-row ${n < 5 ? 'off' : ''}">👥 Regla para 5-6 jugadores
+      <select id="${prefix}-mode5" ${dis || n < 5 ? 'disabled' : ''}>${Object.entries(MODE5_NAMES).map(([k, t]) =>
         `<option value="${k}" ${k === r.mode5 ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
     <p class="muted small rule-help">${n < 5 ? 'Solo se aplica con 5 o 6 jugadores.' : MODE5_HELP[r.mode5]}</p>
-    <label><input type="checkbox" id="${prefix}-cut" ${r.cutRoads ? 'checked' : ''} ${dis}> ✂️ Permitir cortar caminos ajenos con un poblado</label>
     ${longHint}
+    ${toggleHtml(`${prefix}-cut`, '✂️', 'Cortar caminos', 'Un poblado construido en mitad del camino de otro jugador lo corta.', r.cutRoads, dis)}
+    <div class="rules-section">Variantes</div>
+    ${Object.entries(VARIANTS).map(([k, v]) => toggleHtml(`${prefix}-var-${k}`, v.icon, v.name, v.desc, variants[k], dis)).join('')}
+    <div class="rules-section">Expansiones <small>(solo una a la vez)</small></div>
+    ${Object.entries(EXPANSIONS).map(([k, x]) => toggleHtml(`${prefix}-exp-${k}`, x.icon, x.name, x.desc,
+      r.expansion === k, dis || !x.ready, x.ready ? '' : ' <span class="soon">pronto</span>')).join('')}
   </div>`;
 }
 
@@ -117,7 +140,21 @@ const MODE5_HELP = {
 
 function readRules(prefix) {
   const vp = $(`#${prefix}-vp`), m = $(`#${prefix}-mode5`), c = $(`#${prefix}-cut`);
-  return vp ? { winPoints: +vp.value, mode5: m.value, cutRoads: c.checked } : { ...DEFAULT_RULES };
+  if (!vp) return { ...DEFAULT_RULES };
+  const variants = {};
+  for (const k of Object.keys(VARIANTS)) variants[k] = !!($(`#${prefix}-var-${k}`) || {}).checked;
+  const exp = Object.keys(EXPANSIONS).find(k => ($(`#${prefix}-exp-${k}`) || {}).checked) || 'none';
+  return { winPoints: +vp.value, mode5: m.value, cutRoads: c.checked, variants, expansion: exp };
+}
+
+// Las expansiones son excluyentes: al encender una se apagan las demás
+function exclusiveExpansions(e) {
+  const m = e.target.id && e.target.id.match(/^(\w+)-exp-(\w+)$/);
+  if (!m || !e.target.checked) return;
+  for (const k of Object.keys(EXPANSIONS)) {
+    const other = $(`#${m[1]}-exp-${k}`);
+    if (other && k !== m[2]) other.checked = false;
+  }
 }
 
 function boardNote(n) {
@@ -307,6 +344,7 @@ function renderPlayers() {
           <span title="Camino más largo">🛤️ ${p.roadLen}</span>
           ${G.longestHolder === p.id ? '<span class="award" title="Gran Ruta Comercial (+2)">🛣️ Ruta</span>' : ''}
           ${G.armyHolder === p.id ? '<span class="award" title="Gran Ejército de Caballería (+2)">🛡️ Ejército</span>' : ''}
+          ${G.harborHolder === p.id ? '<span class="award" title="Maestro del puerto (+2)">⚓ Puerto</span>' : ''}
         </div>
       </div>
       <div class="pvp" title="Puntos de victoria${hidden ? ' (incluye ' + hidden + ' oculto/s)' : ''}">${pts}${hidden ? '<sup>*</sup>' : ''}</div>
@@ -327,6 +365,10 @@ function renderTurnPanel() {
     <div class="turn-who">${G.phase === 'gameover' ? 'Partida terminada' : 'Juega ' + pname(G.current)}
       ${G.pairedActive ? `<div class="small muted">🤝 Acción de ${pname(G.partner)}</div>` : ''}</div></div>${dice}</div>`;
 
+  if (G.lastEvent && EVENT_INFO[G.lastEvent]) {
+    const ev = EVENT_INFO[G.lastEvent];
+    html += `<div class="event-chip" title="${ev.desc}">${ev.icon} <b>${ev.name}</b><span>${ev.desc}</span></div>`;
+  }
   if (G.phase === 'gameover') {
     html += `<button class="primary wide" data-act="show-winner">🏆 Ver resultados</button>`;
   } else if (a == null) {
@@ -634,6 +676,8 @@ function showRules() {
     <ul><li><b>Turnos en pareja (oficial 2023):</b> tras el turno de un jugador, el jugador emparejado (el 3.º a su izquierda, enfrente con 6) tiene una fase de acción: puede construir, comerciar con el banco y jugar una carta de desarrollo, pero no tira los dados ni comercia con otros jugadores.</li>
     <li><b>Fase especial de construcción (clásica):</b> tras cada turno, todos los demás pueden construir o comprar cartas, por orden.</li></ul>
     <h3>Opciones</h3>
+    <p><b>Variantes:</b> ${Object.values(VARIANTS).map(v => `${v.icon} <b>${v.name}</b>: ${v.desc}`).join(' ')}</p>
+    <p>Si con muchos puntos para ganar ya nadie puede conseguir más, la partida termina y gana quien más puntos tenga.</p>
     <p><b>Cortar caminos:</b> normalmente un poblado construido en mitad del camino de otro jugador lo corta (y puede quitarle la Gran Ruta). Si se desactiva, no se puede construir donde pasa el camino de otro jugador.</p>
     <h3>Partida online</h3>
     <p>Crea una sala y comparte el código o el enlace. Si alguien se desconecta, la IA juega en su lugar hasta que vuelva a entrar.</p>

@@ -431,3 +431,44 @@ button.icon { padding: 3px 9px; }
 .rule-help { margin: -4px 0 0; }
 .hint-warn { margin: 0; font-size: 12px; color: #ffd27a; }
 .tag.pair { background: #6a4bc4; color: #fff; }
+
+/* Interruptores on/off */
+.rules-box { display: flex; flex-direction: column; gap: 8px; }
+.rules-section { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: var(--accent); margin-top: 6px; }
+.rules-section small { text-transform: none; letter-spacing: 0; color: var(--muted); font-weight: 400; }
+.field-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.field-row.off { opacity: .45; }
+.toggle {
+  display: flex; align-items: center; gap: 12px; cursor: pointer; position: relative;
+  background: var(--panel2); border: 1px solid transparent; border-radius: 10px; padding: 8px 12px;
+  transition: border-color .15s, background .15s;
+}
+.toggle:hover { border-color: var(--border); }
+.toggle.off { cursor: default; opacity: .55; }
+.toggle-text { flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.toggle-text small { color: var(--muted); font-size: 12px; line-height: 1.35; }
+.toggle input { position: absolute; opacity: 0; width: 1px; height: 1px; pointer-events: none; }
+.toggle-track {
+  position: relative; flex-shrink: 0; width: 46px; height: 26px; border-radius: 13px;
+  background: #3a4f63; box-shadow: inset 0 1px 3px rgba(0,0,0,.4); transition: background .2s;
+}
+.toggle-track::after {
+  content: ""; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%;
+  background: linear-gradient(180deg, #ffffff, #dfe5ea); box-shadow: 0 1px 3px rgba(0,0,0,.45);
+  transition: transform .2s cubic-bezier(.3,1.4,.6,1);
+}
+.toggle-track::before {
+  content: "OFF"; position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+  font-size: 8px; font-weight: 800; color: #aab8c4; letter-spacing: .04em;
+}
+.toggle input:checked + .toggle-track { background: linear-gradient(180deg, #ffc24d, var(--accent-dark)); }
+.toggle input:checked + .toggle-track::after { transform: translateX(20px); }
+.toggle input:checked + .toggle-track::before { content: "ON"; left: 7px; right: auto; color: #3a2600; }
+.toggle input:focus-visible + .toggle-track { outline: 2px solid #6fb6ff; outline-offset: 2px; }
+.toggle:has(input:checked) { border-color: rgba(242,177,52,.45); background: #2a3a2e; }
+.soon { font-size: 10px; font-weight: 700; background: #3a4f63; color: #cfe0ec; padding: 1px 6px; border-radius: 6px; margin-left: 4px; vertical-align: 1px; }
+@media (prefers-reduced-motion: reduce) { .toggle-track, .toggle-track::after { transition: none; } }
+
+/* Evento de la carta robada */
+.event-chip { display: flex; flex-wrap: wrap; gap: 2px 6px; align-items: baseline; background: #3b2f4f; border: 1px solid #6a4bc4; border-radius: 8px; padding: 6px 10px; margin: 6px 0; font-size: 13px; }
+.event-chip span { color: var(--muted); font-size: 12px; flex-basis: 100%; }

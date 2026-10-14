@@ -153,7 +153,7 @@ setInterval(() => {
 }, 25000);
 
 // ============================ Motor del juego ============================
-const GAME_SCRIPTS = ['board', 'game', 'ai'].map(f =>
+const GAME_SCRIPTS = ['board', 'game', 'variants', 'ai'].map(f =>
   new vm.Script(fs.readFileSync(path.join(ROOT, 'js', f + '.js'), 'utf8'), { filename: f + '.js' }));
 
 function makeEngine() {
@@ -167,6 +167,7 @@ function makeEngine() {
 const BASE = makeEngine();
 const COLORS = BASE.call('PLAYER_COLORS.map(c => c.hex)');
 const RES = BASE.call('RES');
+const EXPANSIONS_READY = []; // se irán añadiendo: 'seafarers', 'ck', 'tb'
 const AI_NAMES = ['Bruno', 'Carla', 'Diego', 'Elena', 'Fede', 'Gala', 'Hugo', 'Irene'];
 
 // ============================ Salas ============================
@@ -310,8 +311,8 @@ function scheduleAI(room) {
 function startGame(room) {
   const setup = room.seats.map(s => ({ name: s.name, color: s.color, isAI: s.isAI }));
   room.engine = makeEngine();
-  const { winPoints, mode5, cutRoads } = room.options;
-  room.engine.call('newGame(__args[0], __args[1])', setup, { winPoints, mode5, cutRoads });
+  const { winPoints, mode5, cutRoads, variants, expansion } = room.options;
+  room.engine.call('newGame(__args[0], __args[1])', setup, { winPoints, mode5, cutRoads, variants, expansion });
   room.started = true;
   room.seats.forEach((s, i) => { if (!s.isAI && !s.connected) markAway(room, i, true); });
   broadcastState(room);
@@ -372,7 +373,7 @@ function onMessage(ws, m) {
     leaveCurrent(ws);
     const room = {
       code: newCode(), seats: [], hostToken: null, started: false, engine: null,
-      options: { winPoints: 10, mode5: 'paired', cutRoads: true, speed: 900 }, chat: [], aiTimer: null, offerTimer: null, lastActive: Date.now(),
+      options: { winPoints: 10, mode5: 'paired', cutRoads: true, variants: {}, expansion: 'none', speed: 900 }, chat: [], aiTimer: null, offerTimer: null, lastActive: Date.now(),
     };
     rooms.set(room.code, room);
     const seat = addHuman(room, m.name, ws);
@@ -470,6 +471,8 @@ function onMessage(ws, m) {
       if (Number.isInteger(Number(m.winPoints)) && m.winPoints >= 5 && m.winPoints <= 20) room.options.winPoints = Number(m.winPoints);
       if (['paired', 'special', 'none'].includes(m.mode5)) room.options.mode5 = m.mode5;
       room.options.cutRoads = m.cutRoads !== false;
+      room.options.variants = BASE.call('cleanVariants(__args[0])', m.variants);
+      room.options.expansion = EXPANSIONS_READY.includes(m.expansion) ? m.expansion : 'none';
       if ([300, 900, 1600].includes(Number(m.speed))) room.options.speed = Number(m.speed);
       break;
     case 'start':
