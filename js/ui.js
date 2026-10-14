@@ -103,7 +103,7 @@ function toggleHtml(id, icon, title, desc, on, disabled, extra = '') {
 
 // Expansiones grandes (excluyentes entre sí)
 const EXPANSIONS = {
-  seafarers: { name: 'Navegantes de Catán', icon: '⛵', desc: 'Barcos, islas, campos de oro y el pirata.', ready: false },
+  seafarers: { name: 'Navegantes de Catán', icon: '⛵', desc: 'Barcos, islas nuevas (+2 puntos), ríos de oro y el pirata. Recomendado: 12-14 puntos.', ready: true },
   ck: { name: 'Ciudades y Caballeros', icon: '🏰', desc: 'Mercancías, caballeros, bárbaros y mejoras de ciudad.', ready: false },
   tb: { name: 'Mercaderes y Bárbaros', icon: '🐪', desc: 'Pescadores, ríos, caravanas y ataque bárbaro.', ready: false },
 };
@@ -273,12 +273,18 @@ function render() {
 // El dibujo del tablero está en boardview.js
 
 function onBoardClick(ev) {
-  const t = ev.target.closest('[data-v],[data-e],[data-h]');
+  const t = ev.target.closest('[data-v],[data-e],[data-h],[data-s],[data-ms]');
   if (!t || !G || humanActor() == null) return;
   if (t.dataset.v != null) {
     const v = +t.dataset.v;
     if (G.phase === 'setup-settlement' || UI.mode === 'poblado') send({ type: 'settle', v });
     else if (UI.mode === 'ciudad') send({ type: 'city', v });
+  } else if (t.dataset.ms != null) {
+    UI.moveFrom = +t.dataset.ms;
+    render();
+  } else if (t.dataset.s != null) {
+    if (UI.mode === 'mover') { send({ type: 'move-ship', from: UI.moveFrom, to: +t.dataset.s }); UI.moveFrom = null; }
+    else send({ type: 'ship', e: +t.dataset.s });
   } else if (t.dataset.e != null) {
     send({ type: 'road', e: +t.dataset.e });
   } else if (t.dataset.h != null && G.phase === 'robber') {
@@ -297,7 +303,8 @@ function renderBanner() {
     const mine = humanActor() === a;
     switch (G.phase) {
       case 'setup-settlement': txt = `${who}: coloca un poblado inicial ${G.setupIdx < G.players.length ? '(1ª ronda)' : '(2ª ronda: recibes recursos)'}`; break;
-      case 'setup-road': txt = `${who}: coloca un camino junto a tu poblado`; break;
+      case 'setup-road': txt = `${who}: coloca un camino${G.seafarers ? ' o un barco' : ''} junto a tu poblado`; break;
+      case 'gold': txt = `${who}: elige ${G.goldNeed[a]} recurso(s) del río de oro`; break;
       case 'roll': txt = `${who}: tira los dados`; break;
       case 'discard': txt = `${who}: descarta ${G.discardNeed[a]} cartas`; break;
       case 'robber': txt = `${who}: mueve el ladrón ${mine ? '(clic en un hexágono)' : ''}`; break;
@@ -306,7 +313,9 @@ function renderBanner() {
       case 'main':
         if (G.trade) txt = `🤝 ${who} propone un intercambio`;
         else txt = UI.mode && mine
-          ? `${who}: elige dónde construir ${{ camino: 'el camino', poblado: 'el poblado', ciudad: 'la ciudad' }[UI.mode]} (Esc para cancelar)`
+          ? (UI.mode === 'mover'
+            ? `${who}: ${UI.moveFrom == null ? 'elige el barco que quieres mover' : 'elige dónde llevarlo'} (Esc para cancelar)`
+            : `${who}: elige dónde construir ${{ camino: 'el camino', poblado: 'el poblado', ciudad: 'la ciudad', barco: 'el barco' }[UI.mode]} (Esc para cancelar)`)
           : `${who}: construye, comercia o termina el turno`;
         break;
       case 'special-build': txt = `🔨 Fase especial de construcción: ${who}`; break;
@@ -345,6 +354,7 @@ function renderPlayers() {
           ${G.longestHolder === p.id ? '<span class="award" title="Gran Ruta Comercial (+2)">🛣️ Ruta</span>' : ''}
           ${G.armyHolder === p.id ? '<span class="award" title="Gran Ejército de Caballería (+2)">🛡️ Ejército</span>' : ''}
           ${G.harborHolder === p.id ? '<span class="award" title="Maestro del puerto (+2)">⚓ Puerto</span>' : ''}
+          ${(p.islands || []).length ? `<span class="award" title="Islas nuevas colonizadas (+2 cada una)">🏝️ ${p.islands.length}</span>` : ''}
         </div>
       </div>
       <div class="pvp" title="Puntos de victoria${hidden ? ' (incluye ' + hidden + ' oculto/s)' : ''}">${pts}${hidden ? '<sup>*</sup>' : ''}</div>
@@ -376,7 +386,8 @@ function renderTurnPanel() {
   } else {
     switch (G.phase) {
       case 'setup-settlement': html += `<div class="info">Haz clic en un punto brillante del tablero para colocar tu poblado.</div>`; break;
-      case 'setup-road': html += `<div class="info">Haz clic en un borde brillante para colocar tu camino.</div>`; break;
+      case 'setup-road': html += `<div class="info">Haz clic en un borde brillante para colocar tu camino${G.seafarers ? ' (o en uno azul para un barco)' : ''}.</div>`; break;
+      case 'gold': html += `<button class="primary wide" data-act="reopen">💰 Elegir recursos del oro</button>`; break;
       case 'roll':
         html += `<button class="primary wide big" data-act="roll">🎲 Tirar dados</button>`;
         if (playableDev(a, 'caballero')) html += `<div class="hint">Puedes jugar un Caballero antes de tirar.</div>`;
@@ -385,7 +396,7 @@ function renderTurnPanel() {
       case 'robber': html += `<div class="info">🦹 Haz clic en un hexágono para mover el ladrón.</div>`; break;
       case 'steal': html += `<button class="primary wide" data-act="reopen">Elegir a quién robar</button>`; break;
       case 'road-building':
-        html += `<div class="info">🛤️ Coloca ${G.freeRoads} camino(s) gratis en el tablero.</div>
+        html += `<div class="info">🛤️ Coloca ${G.freeRoads} ${G.seafarers ? 'camino(s) o barco(s)' : 'camino(s)'} gratis en el tablero.</div>
           <button class="wide" data-act="end-roads">Terminar</button>`;
         break;
       case 'main':
@@ -422,8 +433,15 @@ function buildButtons(a) {
   const b = (kind, label, icon) => `<button class="build ${UI.mode === kind ? 'active' : ''}" data-act="mode" data-kind="${kind}" ${can[kind] ? '' : 'disabled'}>
     <span>${icon} ${label}</span><span class="cost">${costIcons(COSTS[kind])}</span></button>`;
   const canDev = canAfford(a, COSTS.carta) && G.devDeck.length > 0;
+  let sea = '';
+  if (G.seafarers) {
+    can.barco = canAfford(a, COSTS.barco) && p.ships > 0 && shipSpots(a).length > 0;
+    const canMove = G.phase !== 'special-build' && movableShips(a).length > 0;
+    sea = b('barco', 'Barco', '⛵') + `<button class="build ${UI.mode === 'mover' ? 'active' : ''}" data-act="mode" data-kind="mover" ${canMove ? '' : 'disabled'}>
+      <span>↪️ Mover barco</span><span class="cost">${G.shipMoved ? 'ya movido' : '1 por turno'}</span></button>`;
+  }
   return `<div class="btn-grid">${b('camino', 'Camino', '🛤️')}${b('poblado', 'Poblado', '🏠')}${b('ciudad', 'Ciudad', '🏰')}
-    <button class="build" data-act="buy" ${canDev ? '' : 'disabled'}><span>📜 Carta</span><span class="cost">${costIcons(COSTS.carta)}</span></button></div>`;
+    <button class="build" data-act="buy" ${canDev ? '' : 'disabled'}><span>📜 Carta</span><span class="cost">${costIcons(COSTS.carta)}</span></button>${sea}</div>`;
 }
 
 function renderHand() {
@@ -456,7 +474,7 @@ function renderHand() {
     html += '</div>';
   } else html += '<div class="muted small">Sin cartas de desarrollo.</div>';
 
-  html += `<div class="pieces">Piezas: 🛤️ ${p.roads} · 🏠 ${p.settlements} · 🏰 ${p.cities}</div>
+  html += `<div class="pieces">Piezas: 🛤️ ${p.roads} · 🏠 ${p.settlements} · 🏰 ${p.cities}${G.seafarers ? ` · ⛵ ${p.ships}` : ''}</div>
     <div class="rates">Banco: ${RES.map(r => `<span>${RES_INFO[r].icon} ${bankRate(v, r)}:1</span>`).join('')}</div>`;
   $('#hand').innerHTML = html;
 }
@@ -490,11 +508,12 @@ function syncModals() {
   if (offerTargets().length) { if (UI.modal !== 'offer') showOffer(); return; }
   if (G.phase === 'discard' && a != null) { if (UI.modal !== 'discard-' + a) showDiscard(a); return; }
   if (G.phase === 'steal' && a != null) { if (UI.modal !== 'steal') showSteal(); return; }
+  if (G.phase === 'gold' && a != null) { if (UI.modal !== 'gold-' + a) showGold(a); return; }
   if (UI.online && G.trade && G.trade.from !== NET.seat && G.trade.responses[NET.seat] === null) {
     if (UI.modal !== 'trade-resp') showTradeResp();
     return;
   }
-  if (UI.modal && /^(discard|steal|offer|winner|trade-resp)/.test(UI.modal)) closeModal();
+  if (UI.modal && /^(discard|steal|offer|winner|trade-resp|gold)/.test(UI.modal)) closeModal();
   const myTurn = (G.phase === 'main' && a === G.current) || (G.phase === 'paired' && a === G.partner);
   if (['bank', 'yop', 'mono'].includes(UI.modal) && !myTurn) closeModal();
   if (UI.modal === 'trade' && !(G.phase === 'main' && a === G.current)) closeModal();
@@ -525,6 +544,17 @@ function showDiscard(pid) {
     ${stepper('dsel', sel, P(pid).res)}
     <div class="modal-foot"><span class="counter ${n === need ? 'ok' : ''}">${n} / ${need}</span>
     <button class="primary" data-act="discard-ok" ${n === need ? '' : 'disabled'}>Descartar</button></div>`);
+}
+
+// --- Río de oro ---
+function showGold(pid) {
+  if (UI.modal !== 'gold-' + pid) UI.goldSel = zeroRes();
+  const need = Math.min(G.goldNeed[pid], RES.reduce((s, r) => s + G.bank[r], 0)), sel = UI.goldSel, n = total(sel);
+  openModal('gold-' + pid, `<h2>💰 ${pname(pid)}: río de oro</h2>
+    <p>Elige ${need} recurso(s) del banco.</p>
+    ${stepper('gsel', sel, n >= need ? sel : G.bank)}
+    <div class="modal-foot"><span class="counter ${n === need ? 'ok' : ''}">${n} / ${need}</span>
+    <button class="primary" data-act="gold-ok" ${n === need ? '' : 'disabled'}>Tomar</button></div>`);
 }
 
 // --- Robo ---
@@ -675,6 +705,13 @@ function showRules() {
     <p>Tablero de 30 hexágonos (2 desiertos), 11 puertos y más cartas. Se elige una regla al crear la partida:</p>
     <ul><li><b>Turnos en pareja (oficial 2023):</b> tras el turno de un jugador, el jugador emparejado (el 3.º a su izquierda, enfrente con 6) tiene una fase de acción: puede construir, comerciar con el banco y jugar una carta de desarrollo, pero no tira los dados ni comercia con otros jugadores.</li>
     <li><b>Fase especial de construcción (clásica):</b> tras cada turno, todos los demás pueden construir o comprar cartas, por orden.</li></ul>
+    <h3>⛵ Navegantes de Catán</h3>
+    <ul><li><b>Barcos</b> (${costIcons(COSTS.barco)}): se construyen en aristas junto al mar, unidos a un poblado o a otro barco tuyo. Caminos y barcos solo se enlazan a través de un poblado o ciudad.</li>
+    <li>Una vez por turno puedes <b>mover un barco</b> del extremo abierto de una línea (no uno construido en ese turno).</li>
+    <li>El primer poblado de cada jugador en una <b>isla nueva</b> vale <b>+2 puntos</b>. La colocación inicial es solo en la isla principal.</li>
+    <li><b>Ríos de oro:</b> producen el recurso que tú elijas.</li>
+    <li><b>Pirata:</b> con un 7 o un caballero puedes mover el pirata en vez del ladrón. Bloquea los barcos junto a él y roba a quien tenga barcos allí.</li>
+    <li>La Gran Ruta Comercial cuenta caminos y barcos.</li></ul>
     <h3>Opciones</h3>
     <p><b>Variantes:</b> ${Object.values(VARIANTS).map(v => `${v.icon} <b>${v.name}</b>: ${v.desc}`).join(' ')}</p>
     <p>Si con muchos puntos para ganar ya nadie puede conseguir más, la partida termina y gana quien más puntos tenga.</p>
@@ -717,7 +754,7 @@ function onClick(ev) {
   const a = humanActor();
   switch (act) {
     case 'roll': send({ type: 'roll' }); break;
-    case 'mode': UI.mode = UI.mode === t.dataset.kind ? null : t.dataset.kind; render(); break;
+    case 'mode': UI.mode = UI.mode === t.dataset.kind ? null : t.dataset.kind; UI.moveFrom = null; render(); break;
     case 'buy': send({ type: 'buy' }); break;
     case 'end-turn': send({ type: 'end-turn' }); break;
     case 'end-special': send({ type: 'end-special' }); break;
@@ -728,6 +765,8 @@ function onClick(ev) {
     // descarte y robo
     case 'dsel': UI.discardSel[r] += d; showDiscard(a); break;
     case 'discard-ok': send({ type: 'discard', sel: UI.discardSel }); break;
+    case 'gsel': UI.goldSel[r] += d; showGold(a); break;
+    case 'gold-ok': send({ type: 'gold', sel: UI.goldSel }); break;
     case 'steal': send({ type: 'steal', p }); break;
     // banco
     case 'open-bank': openBank(); break;
@@ -766,7 +805,7 @@ function onKey(ev) {
     if (UI.modal && ['bank', 'trade', 'yop', 'mono', 'rules', 'winner'].includes(UI.modal)) {
       if (UI.modal === 'trade' && G && myTrade() && humanActor() === G.current) send({ type: 'trade-cancel' });
       closeModal(); render();
-    } else if (UI.mode) { UI.mode = null; render(); }
+    } else if (UI.mode) { UI.mode = null; UI.moveFrom = null; render(); }
   }
   if (ev.key === ' ' && !typing && G && G.phase === 'roll' && humanActor() != null && !UI.modal) {
     ev.preventDefault();

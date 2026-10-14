@@ -20,7 +20,7 @@ function cleanVariants(v) {
 
 // ============================ Ladrón amistoso ============================
 function robberAllowed(hid, mover) {
-  if (hid === G.robber || !G.hexes[hid]) return false;
+  if (hid === G.robber || !G.hexes[hid] || G.hexes[hid].terrain === 'mar') return false;
   if (!G.variants.friendlyRobber) return true;
   const protectedHex = h => h.vertices.some(v => {
     const b = G.vertices[v].building;
@@ -28,7 +28,7 @@ function robberAllowed(hid, mover) {
   });
   if (!protectedHex(G.hexes[hid])) return true;
   // Si todos los hexágonos están protegidos, se puede usar cualquiera
-  return G.hexes.every(h => h.id === G.robber || protectedHex(h));
+  return G.hexes.every(h => h.id === G.robber || h.terrain === 'mar' || protectedHex(h));
 }
 
 // ============================ Cartas de eventos ============================

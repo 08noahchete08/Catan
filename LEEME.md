@@ -12,6 +12,10 @@ Al crear la partida (local u online) se puede elegir:
   - **Fase especial de construcción (clásica):** tras cada turno, todos los demás pueden construir.
   - **Sin regla extra.**
 - **Cortar caminos:** si se desactiva, no se puede construir un poblado donde pasa el camino de otro jugador.
+- **Variantes** (combinables): ladrón amistoso, cartas de eventos y maestro del puerto.
+- **Expansiones** (una a la vez):
+  - **Navegantes de Catán:** mapa con isla principal e islas nuevas generado al azar, barcos (madera + lana), mover un barco por turno, ríos de oro, pirata y +2 puntos por colonizar cada isla nueva. Recomendado: 12-14 puntos.
+  - Ciudades y Caballeros, Mercaderes y Bárbaros: en preparación.
 
 ## Jugar en local
 

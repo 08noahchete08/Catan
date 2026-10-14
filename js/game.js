@@ -8,11 +8,12 @@ const COSTS = {
   poblado: { madera: 1, arcilla: 1, lana: 1, trigo: 1 },
   ciudad:  { trigo: 2, mineral: 3 },
   carta:   { lana: 1, trigo: 1, mineral: 1 },
+  barco:   { madera: 1, lana: 1 },
 };
 
 const DEV_INFO = {
   caballero:  { name: 'Caballero', icon: '⚔️', desc: 'Mueve el ladrón y roba una carta a un jugador junto a ese hexágono.' },
-  carreteras: { name: 'Construcción de carreteras', icon: '🛤️', desc: 'Construye 2 caminos gratis.' },
+  carreteras: { name: 'Construcción de carreteras', icon: '🛤️', desc: 'Construye 2 caminos gratis (o barcos, con Navegantes).' },
   abundancia: { name: 'Año de abundancia', icon: '🎁', desc: 'Toma 2 cartas de recurso cualesquiera del banco.' },
   monopolio:  { name: 'Monopolio', icon: '💰', desc: 'Elige un recurso: todos los demás te entregan todas sus cartas de ese recurso.' },
   puntos:     { name: 'Punto de victoria', icon: '🏆', desc: 'Vale 1 punto de victoria. Se mantiene oculta.' },
@@ -48,7 +49,8 @@ function hexName(h) { return TERRAIN[h.terrain].name + (h.number ? ` (${h.number
 function newGame(setup, opts) {
   const n = setup.length;
   const cfg = CONFIGS[n > 4 ? 'ext' : 'base'];
-  const board = generateBoard(cfg);
+  const seafarers = opts.expansion === 'seafarers';
+  const board = seafarers ? generateSeaBoard(n) : generateBoard(cfg);
   const start = rand(n);
   const order = [];
   for (let i = 0; i < n; i++) order.push((start + i) % n);
@@ -64,6 +66,7 @@ function newGame(setup, opts) {
     players: setup.map((p, i) => ({
       id: i, name: p.name, color: p.color, isAI: p.isAI, away: false,
       res: zeroRes(), dev: [], knights: 0, roads: 15, settlements: 5, cities: 4, roadLen: 0,
+      ships: seafarers ? 15 : 0, islands: [],
     })),
     bank, devDeck: deck,
     // Reglas configurables
@@ -72,6 +75,8 @@ function newGame(setup, opts) {
     // Reglas para 5-6 jugadores: 'paired' (turnos en pareja, 2023), 'special' (fase especial clásica) o 'none'
     mode5: n > 4 && ['paired', 'special', 'none'].includes(opts.mode5) ? opts.mode5 : (n > 4 && opts.mode5 == null ? 'paired' : 'none'),
     partner: null, pairedActive: false,
+    expansion: seafarers ? 'seafarers' : 'none', seafarers,
+    goldNeed: {}, goldQueue: [], afterGold: null, shipMoved: false,
     variants: cleanVariants(opts.variants), harborHolder: null, eventDeck: null, newYearAt: 0, epidemic: false, lastEvent: null,
     phase: 'setup-settlement',
     setupOrder: order.concat(order.slice().reverse()), setupIdx: 0,
@@ -83,7 +88,8 @@ function newGame(setup, opts) {
     offer: null, trade: null, aiTrades: 0, aiOffers: 0,
     log: [],
   };
-  log(`Nueva partida: ${n} jugadores, tablero ${cfg.id === 'ext' ? 'ampliado (5-6)' : 'básico'}. Empieza ${pname(order[0])}.`);
+  annotateBoard();
+  log(`Nueva partida: ${n} jugadores, ${seafarers ? '⛵ Navegantes de Catán' : `tablero ${cfg.id === 'ext' ? 'ampliado (5-6)' : 'básico'}`}. Empieza ${pname(order[0])}.`);
 }
 
 // Jugador controlado por la IA (de forma permanente o porque se ha desconectado)
@@ -100,6 +106,7 @@ function actor() {
   if (!G) return null;
   if (G.phase === 'discard') return G.discardQueue[0];
   if (G.phase === 'special-build') return G.specialBuilder;
+  if (G.phase === 'gold') return G.goldQueue[0];
   return activePlayer();
 }
 
@@ -109,6 +116,7 @@ function vp(pid, includeHidden = true) {
   if (G.longestHolder === pid) s += 2;
   if (G.armyHolder === pid) s += 2;
   if (G.harborHolder === pid) s += 2;
+  s += (P(pid).islands || []).length * 2;
   if (includeHidden) s += P(pid).dev.filter(d => d.type === 'puntos').length;
   return s;
 }
@@ -131,7 +139,7 @@ function canBuildNow(pid) {
 // ---------- validación de posiciones ----------
 function validSettlementSpot(pid, vid, ignoreRoad) {
   const v = G.vertices[vid];
-  if (v.building) return false;
+  if (v.building || v.land === false) return false;
   if (v.adj.some(a => G.vertices[a].building)) return false;
   // Sin «cortar caminos»: no se puede construir donde pasa el camino de otro jugador
   if (!G.cutRoads) {
@@ -143,13 +151,13 @@ function validSettlementSpot(pid, vid, ignoreRoad) {
       if (count[o] >= 2) return false;
     }
   }
-  if (!ignoreRoad && !v.edges.some(e => G.edges[e].road === pid)) return false;
+  if (!ignoreRoad && !v.edges.some(e => G.edges[e].road === pid || G.edges[e].ship === pid)) return false;
   return true;
 }
 
 function validRoadSpot(pid, eid, fromVertex) {
   const e = G.edges[eid];
-  if (e.road !== null) return false;
+  if (e.road !== null || e.ship != null || e.land === false) return false;
   if (fromVertex != null) return e.v.includes(fromVertex);
   return e.v.some(vid => {
     const v = G.vertices[vid];
@@ -159,7 +167,9 @@ function validRoadSpot(pid, eid, fromVertex) {
 }
 
 function settlementSpots(pid, ignoreRoad) {
-  return G.vertices.filter(v => validSettlementSpot(pid, v.id, ignoreRoad)).map(v => v.id);
+  // En Navegantes, la colocación inicial es solo en la isla principal
+  const mainOnly = ignoreRoad && G.seafarers && G.phase === 'setup-settlement';
+  return G.vertices.filter(v => (!mainOnly || v.island === 0) && validSettlementSpot(pid, v.id, ignoreRoad)).map(v => v.id);
 }
 function roadSpots(pid, fromVertex) {
   return G.edges.filter(e => validRoadSpot(pid, e.id, fromVertex)).map(e => e.id);
@@ -175,23 +185,27 @@ function buildSettlement(pid, vid) {
   if (setup) { if (pid !== G.current) return false; }
   else if (!canBuildNow(pid) || !canAfford(pid, COSTS.poblado)) return false;
   if (p.settlements <= 0 || !validSettlementSpot(pid, vid, setup)) return false;
+  if (setup && G.seafarers && G.vertices[vid].island !== 0) return false;
   if (!setup) pay(pid, COSTS.poblado);
   const v = G.vertices[vid];
   v.building = { owner: pid, type: 'poblado' };
   p.settlements--;
   log(`${pname(pid)} construye un poblado${v.port ? ' en un puerto' : ''}.`);
   updateHarbormaster();
+  if (!setup) claimIsland(pid, vid);
   if (setup) {
     G.lastSettlement = vid;
     if (G.setupIdx >= G.players.length) {
       const got = zeroRes();
       for (const hid of v.hexes) {
-        const r = TERRAIN[G.hexes[hid].terrain].res;
-        if (r) got[r] += give(pid, r, 1);
+        const t = TERRAIN[G.hexes[hid].terrain];
+        if (t.res) got[t.res] += give(pid, t.res, 1);
+        if (t.gold) G.goldNeed[pid] = (G.goldNeed[pid] || 0) + 1;
       }
       if (total(got)) log(`${pname(pid)} recibe ${resStr(got)}.`);
     }
     G.phase = 'setup-road';
+    startGold('setup-road');
   }
   updateLongestRoad();
   checkWin();
@@ -233,7 +247,7 @@ function buildRoad(pid, eid) {
     placeRoad(pid, eid);
     G.freeRoads--;
     log(`${pname(pid)} construye un camino gratis.`);
-    if (G.freeRoads <= 0 || p.roads <= 0 || !roadSpots(pid).length) G.phase = G.pairedActive ? 'paired' : 'main';
+    if (G.freeRoads <= 0 || !freeBuildLeft(pid)) G.phase = G.pairedActive ? 'paired' : 'main';
     updateLongestRoad();
     checkWin();
     return true;
@@ -255,6 +269,12 @@ function buyDev(pid) {
   log(`${pname(pid)} compra una carta de desarrollo.`);
   checkWin();
   return true;
+}
+
+// ¿Puede seguir construyendo caminos o barcos gratis?
+function freeBuildLeft(pid) {
+  const p = P(pid);
+  return (p.roads > 0 && roadSpots(pid).length > 0) || (p.ships > 0 && shipSpots(pid).length > 0);
 }
 
 function advanceSetup() {
@@ -300,6 +320,7 @@ function rollDice() {
     produce(s);
     G.epidemic = false;
     G.phase = 'main';
+    startGold('main');
   }
   return true;
 }
@@ -310,6 +331,13 @@ function produce(n) {
   for (const h of G.hexes) {
     if (h.number !== n || h.id === G.robber) continue;
     const r = TERRAIN[h.terrain].res;
+    if (TERRAIN[h.terrain].gold) {
+      for (const vid of h.vertices) {
+        const b = G.vertices[vid].building;
+        if (b) G.goldNeed[b.owner] = (G.goldNeed[b.owner] || 0) + (b.type === 'ciudad' && !G.epidemic ? 2 : 1);
+      }
+      continue;
+    }
     if (!r) continue;
     for (const vid of h.vertices) {
       const b = G.vertices[vid].building;
@@ -359,10 +387,18 @@ function robberVictims(hid, pid) {
 }
 
 function moveRobber(hid) {
-  if (G.phase !== 'robber' || !robberAllowed(hid, activePlayer())) return false;
-  G.robber = hid;
-  log(`${pname(activePlayer())} mueve el ladrón a ${hexName(G.hexes[hid])}.`);
-  const victims = robberVictims(hid, activePlayer());
+  if (G.phase !== 'robber') return false;
+  let victims;
+  if (pirateAllowed(hid)) {
+    G.pirate = hid;
+    log(`🏴‍☠️ ${pname(activePlayer())} mueve el pirata.`);
+    victims = pirateVictims(hid, activePlayer());
+  } else {
+    if (!robberAllowed(hid, activePlayer()) || isSea(G.hexes[hid])) return false;
+    G.robber = hid;
+    log(`${pname(activePlayer())} mueve el ladrón a ${hexName(G.hexes[hid])}.`);
+    victims = robberVictims(hid, activePlayer());
+  }
   if (!victims.length) G.phase = G.afterRobber;
   else if (victims.length === 1) doSteal(victims[0]);
   else { G.stealCandidates = victims; G.phase = 'steal'; }
@@ -418,9 +454,9 @@ function playKnight(pid) {
 }
 
 function playRoadBuilding(pid) {
-  if (!playableDev(pid, 'carreteras') || P(pid).roads <= 0 || !roadSpots(pid).length) return false;
+  if (!playableDev(pid, 'carreteras') || !freeBuildLeft(pid)) return false;
   useDev(pid, 'carreteras');
-  G.freeRoads = Math.min(2, P(pid).roads);
+  G.freeRoads = Math.min(2, P(pid).roads + P(pid).ships);
   G.phase = 'road-building';
   return true;
 }
@@ -561,6 +597,9 @@ function applyAction(pid, a) {
     case 'settle': return !!G.vertices[v] && buildSettlement(pid, v);
     case 'city': return !!G.vertices[v] && buildCity(pid, v);
     case 'road': return !!G.edges[e] && buildRoad(pid, e);
+    case 'ship': return !!G.edges[e] && buildShip(pid, e);
+    case 'move-ship': return moveShip(pid, toInt(a.from), toInt(a.to));
+    case 'gold': return chooseGold(pid, cleanRes(a.sel));
     case 'roll': return pid === G.current && rollDice();
     case 'buy': return buyDev(pid);
     case 'end-turn': return endTurn(pid);
@@ -595,6 +634,7 @@ function endTurn(pid) {
     G.pairedActive = true;
     G.devPlayed = false;
     G.aiTrades = 0;
+    G.shipMoved = false;
     G.phase = 'paired';
     log(`🤝 Acción del jugador en pareja: ${pname(G.partner)}.`);
     checkWin();
@@ -635,7 +675,8 @@ function canBuildAnything(pid) {
   return (canAfford(pid, COSTS.carta) && G.devDeck.length > 0) ||
     (canAfford(pid, COSTS.ciudad) && p.cities > 0 && citySpots(pid).length > 0) ||
     (canAfford(pid, COSTS.poblado) && p.settlements > 0 && settlementSpots(pid, false).length > 0) ||
-    (canAfford(pid, COSTS.camino) && p.roads > 0 && roadSpots(pid).length > 0);
+    (canAfford(pid, COSTS.camino) && p.roads > 0 && roadSpots(pid).length > 0) ||
+    (G.seafarers && canAfford(pid, COSTS.barco) && p.ships > 0 && shipSpots(pid).length > 0);
 }
 
 function nextTurn() {
@@ -644,6 +685,7 @@ function nextTurn() {
   G.phase = 'roll';
   G.dice = null;
   G.devPlayed = false;
+  G.shipMoved = false;
   G.specialBuilder = null;
   G.partner = null;
   G.pairedActive = false;
@@ -688,22 +730,27 @@ function checkWin() {
 function longestRoadFor(pid) {
   let best = 0;
   const used = new Set();
-  const blocked = vid => { const b = G.vertices[vid].building; return b && b.owner !== pid; };
-  function dfs(vid, len) {
+  const building = vid => G.vertices[vid].building;
+  const blocked = vid => { const b = building(vid); return b && b.owner !== pid; };
+  const own = vid => { const b = building(vid); return b && b.owner === pid; };
+  const kind = e => (e.road === pid ? 'r' : e.ship === pid ? 's' : null);
+  function dfs(vid, len, last) {
     if (len > best) best = len;
     for (const eid of G.vertices[vid].edges) {
       const e = G.edges[eid];
-      if (e.road !== pid || used.has(eid)) continue;
+      const k = kind(e);
+      if (!k || used.has(eid)) continue;
+      if (last && k !== last && !own(vid)) continue;
       const nv = e.v[0] === vid ? e.v[1] : e.v[0];
       used.add(eid);
       if (blocked(nv)) { if (len + 1 > best) best = len + 1; }
-      else dfs(nv, len + 1);
+      else dfs(nv, len + 1, k);
       used.delete(eid);
     }
   }
   const starts = new Set();
-  for (const e of G.edges) if (e.road === pid) { starts.add(e.v[0]); starts.add(e.v[1]); }
-  for (const s of starts) dfs(s, 0);
+  for (const e of G.edges) if (kind(e)) { starts.add(e.v[0]); starts.add(e.v[1]); }
+  for (const st of starts) dfs(st, 0, null);
   return best;
 }
 

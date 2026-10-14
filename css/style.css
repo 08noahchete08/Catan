@@ -472,3 +472,15 @@ button.icon { padding: 3px 9px; }
 /* Evento de la carta robada */
 .event-chip { display: flex; flex-wrap: wrap; gap: 2px 6px; align-items: baseline; background: #3b2f4f; border: 1px solid #6a4bc4; border-radius: 8px; padding: 6px 10px; margin: 6px 0; font-size: 13px; }
 .event-chip span { color: var(--muted); font-size: 12px; flex-basis: 100%; }
+
+/* Navegantes */
+.sea-hex { fill: rgba(120, 190, 235, .14); stroke: rgba(255, 255, 255, .12); stroke-width: 1.5; }
+.ship-target { cursor: pointer; animation: pulse 1s infinite; }
+.ship-target circle { fill: rgba(30, 110, 170, .85); stroke: #bfe8ff; stroke-width: 2; }
+.ship-target text { font-size: 11px; text-anchor: middle; pointer-events: none; }
+.ship-target:hover { animation: none; }
+.ship-target:hover circle { fill: #2a8fd6; stroke: #fff; }
+.ship-pick { fill: rgba(127, 208, 255, .3); stroke: #7fd0ff; }
+.ship-selected { fill: none; stroke: #ffe28a; stroke-width: 3; pointer-events: none; }
+.pirate-hit { stroke: rgba(30, 30, 40, .9); }
+.pirate-hit:hover { fill: rgba(20, 20, 30, .35); stroke: #111; }

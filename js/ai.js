@@ -26,12 +26,14 @@ const AI = {
     let s = 0;
     for (const hid of v.hexes) {
       const h = G.hexes[hid], r = TERRAIN[h.terrain].res;
+      if (TERRAIN[h.terrain].gold) { s += pips(h.number) * 1.25 * (hid === G.robber ? 0.5 : 1); continue; }
       if (!r) continue;
       s += pips(h.number) * AI_WEIGHT[r] * (hid === G.robber ? 0.5 : 1);
       if (!prod[r] && !types.has(r)) s += 1.5;
       types.add(r);
     }
     s += types.size * 0.6;
+    if (G.seafarers && v.island > 0 && !P(pid).islands.includes(v.island)) s += 5;
     if (v.port) {
       if (v.port === 'generic') s += 1.2;
       else s += (prod[v.port] || 0) >= 5 ? 2.5 : 0.5;
@@ -51,43 +53,78 @@ const AI = {
     return RES.reduce((s, r) => s + Math.max(0, (cost[r] || 0) - res[r]), 0);
   },
 
-  // Busca el mejor lugar para un poblado accesible construyendo caminos.
+  // Busca el mejor lugar para un poblado accesible con caminos (y barcos en Navegantes).
+  // Devuelve { edge, kind: 'r' | 's', score, v, d }: la primera pieza a construir.
   roadTarget(pid, starts) {
     const p = P(pid);
-    if (p.roads <= 0) return null;
-    if (!starts) {
-      starts = [];
-      for (const v of G.vertices) {
-        if (v.building) { if (v.building.owner === pid) starts.push(v.id); continue; }
-        if (v.edges.some(e => G.edges[e].road === pid)) starts.push(v.id);
-      }
-    }
+    const canR = p.roads > 0, canS = !!G.seafarers && p.ships > 0;
+    if (!canR && !canS) return null;
     const prod = AI.production(pid);
-    const seen = new Set(starts);
-    const q = starts.map(s => ({ v: s, first: null, d: 0 }));
+    const seen = new Set(), q = [];
+    const push = (v, mode, first, kind, d) => {
+      const key = v + mode;
+      if (seen.has(key)) return;
+      seen.add(key);
+      q.push({ v, mode, first, kind, d });
+    };
+    if (!starts) {
+      for (const v of G.vertices) {
+        if (v.building) {
+          if (v.building.owner === pid) { push(v.id, 'r', null, null, 0); push(v.id, 's', null, null, 0); }
+          continue;
+        }
+        if (v.edges.some(e => G.edges[e].road === pid)) push(v.id, 'r', null, null, 0);
+        if (v.edges.some(e => G.edges[e].ship === pid)) push(v.id, 's', null, null, 0);
+      }
+    } else starts.forEach(st => { push(st, 'r', null, null, 0); push(st, 's', null, null, 0); });
+    const maxD = G.seafarers ? 6 : 4;
     let best = null;
     while (q.length) {
       const cur = q.shift();
       if (cur.d > 0 && validSettlementSpot(pid, cur.v, true)) {
         const sc = AI.scoreVertex(pid, cur.v, prod) / (cur.d + 0.6);
-        if (!best || sc > best.score) best = { edge: cur.first, score: sc, v: cur.v, d: cur.d };
+        if (!best || sc > best.score) best = { edge: cur.first, kind: cur.kind, score: sc, v: cur.v, d: cur.d };
       }
-      if (cur.d >= Math.min(4, p.roads)) continue;
+      if (cur.d >= Math.min(maxD, cur.mode === 'r' ? p.roads : p.ships)) continue;
       const vv = G.vertices[cur.v];
       if (cur.d > 0 && vv.building) continue;
       for (const eid of vv.edges) {
         const e = G.edges[eid];
-        if (e.road !== null) continue;
+        if (e.road !== null || e.ship != null) continue;
+        const ok = cur.mode === 'r' ? canR && e.land !== false : canS && e.sea && !nearPirate(e);
+        if (!ok) continue;
         const nv = e.v[0] === cur.v ? e.v[1] : e.v[0];
-        if (seen.has(nv)) continue;
-        seen.add(nv);
-        q.push({ v: nv, first: cur.first === null ? eid : cur.first, d: cur.d + 1 });
+        push(nv, cur.mode, cur.first === null ? eid : cur.first, cur.first === null ? cur.mode : cur.kind, cur.d + 1);
       }
     }
     return best;
   },
 
-  costOf(g) { return g === 'ruta' ? COSTS.camino : COSTS[g]; },
+  // Construye la primera pieza (camino o barco) hacia un objetivo
+  buildToward(pid, t, free) {
+    if (!t) return false;
+    if (t.kind === 's') return (free || canAfford(pid, COSTS.barco)) && buildShip(pid, t.edge);
+    return (free || canAfford(pid, COSTS.camino)) && buildRoad(pid, t.edge);
+  },
+
+  chooseGold(pid) {
+    const need = Math.min(G.goldNeed[pid], RES.reduce((s, r) => s + G.bank[r], 0));
+    const g = AI.goal(pid);
+    const cost = g ? AI.costOf(g) : {};
+    const tmp = { ...P(pid).res }, bank = { ...G.bank }, sel = zeroRes();
+    for (let i = 0; i < need; i++) {
+      let best = null, bv = -Infinity;
+      for (const r of RES) {
+        if (bank[r] <= 0) continue;
+        const v = ((cost[r] || 0) - tmp[r]) * 2 - tmp[r] * 0.3 + Math.random() * 0.1;
+        if (v > bv) { bv = v; best = r; }
+      }
+      sel[best]++; tmp[best]++; bank[best]--;
+    }
+    return chooseGold(pid, sel);
+  },
+
+  costOf(g) { return g === 'ruta' ? COSTS.camino : COSTS[g]; }, // incluye 'barco'
 
   // Camino que más alarga la ruta propia (para pelear la Gran Ruta Comercial)
   longRoadEdge(pid) {
@@ -108,7 +145,8 @@ const AI = {
     const spots = settlementSpots(pid, false);
     if (p.cities > 0 && citySpots(pid).length) opts.push(['ciudad', 0.4]);
     if (p.settlements > 0 && spots.length) opts.push(['poblado', 0.6]);
-    if (p.settlements > 0 && !spots.length && AI.roadTarget(pid)) opts.push(['camino', 0.3]);
+    const target = p.settlements > 0 && !spots.length ? AI.roadTarget(pid) : null;
+    if (target) opts.push([target.kind === 's' ? 'barco' : 'camino', 0.3]);
     if (G.devDeck.length) opts.push(['carta', -0.5]);
     let best = null, bs = Infinity;
     for (const [g, bonus] of opts) {
@@ -129,6 +167,17 @@ const AI = {
   chooseRobberHex(pid) {
     let best = null, bs = -Infinity;
     for (const h of G.hexes) {
+      if (G.seafarers && pirateAllowed(h.id)) {
+        // Pirata: molesta a los barcos rivales y roba a uno de ellos
+        let s = Math.random() * 0.2;
+        for (const eid of h.edges) {
+          const o = G.edges[eid].ship;
+          if (o === pid) s -= 4;
+          else if (o !== null) s += 2 * (1 + vp(o, false) / 4) + (total(P(o).res) > 0 ? 1.5 : 0);
+        }
+        if (s > bs) { bs = s; best = h.id; }
+        continue;
+      }
       if (!robberAllowed(h.id, pid)) continue;
       let s = Math.random() * 0.2;
       for (const vid of h.vertices) {
@@ -265,10 +314,7 @@ const AI = {
       if (ss.length) return buildSettlement(pid, ss[0]);
     }
     const g = AI.goal(pid);
-    if (allowRoad && g === 'camino' && canAfford(pid, COSTS.camino)) {
-      const t = AI.roadTarget(pid);
-      if (t) return buildRoad(pid, t.edge);
-    }
+    if (allowRoad && (g === 'camino' || g === 'barco') && AI.buildToward(pid, AI.roadTarget(pid))) return true;
     if (g === 'carta' && canAfford(pid, COSTS.carta) && G.devDeck.length) return buyDev(pid);
     if (allowRoad && g === 'ruta' && canAfford(pid, COSTS.camino)) {
       const e = AI.longRoadEdge(pid);
@@ -286,10 +332,7 @@ const AI = {
     // Gastar cartas si hay riesgo de descarte por un 7
     if (total(P(pid).res) > 7) {
       if (canAfford(pid, COSTS.carta) && G.devDeck.length) return buyDev(pid);
-      if (canAfford(pid, COSTS.camino)) {
-        const t = AI.roadTarget(pid);
-        if (t) return buildRoad(pid, t.edge);
-      }
+      if (AI.buildToward(pid, AI.roadTarget(pid))) return true;
     }
     return endTurn(pid);
   },
@@ -319,9 +362,10 @@ const AI = {
       }
       case 'setup-road': {
         const t = AI.roadTarget(pid, [G.lastSettlement]);
-        ok = buildRoad(pid, t ? t.edge : roadSpots(pid, G.lastSettlement)[0]);
+        ok = AI.buildToward(pid, t, true) || buildRoad(pid, roadSpots(pid, G.lastSettlement)[0]);
         break;
       }
+      case 'gold': ok = AI.chooseGold(pid); break;
       case 'roll':
         ok = (AI.robberOnMe(pid) && playKnight(pid)) || rollDice();
         break;
@@ -330,9 +374,8 @@ const AI = {
       case 'steal': ok = steal(AI.chooseVictim(pid, G.stealCandidates)); break;
       case 'road-building': {
         const spots = roadSpots(pid);
-        const t = AI.roadTarget(pid);
-        const eid = t && spots.includes(t.edge) ? t.edge : spots[rand(spots.length)];
-        ok = eid == null ? endRoadBuilding(pid) : buildRoad(pid, eid);
+        ok = AI.buildToward(pid, AI.roadTarget(pid), true) ||
+          (spots.length ? buildRoad(pid, spots[rand(spots.length)]) : endRoadBuilding(pid));
         break;
       }
       case 'main': ok = AI.mainStep(pid); break;
@@ -346,7 +389,18 @@ const AI = {
   fallback(pid) {
     switch (G.phase) {
       case 'setup-settlement': buildSettlement(pid, settlementSpots(pid, true)[0]); break;
-      case 'setup-road': buildRoad(pid, roadSpots(pid, G.lastSettlement)[0]); break;
+      case 'setup-road': {
+        const r = roadSpots(pid, G.lastSettlement);
+        if (r.length) buildRoad(pid, r[0]); else buildShip(pid, shipSpots(pid, G.lastSettlement)[0]);
+        break;
+      }
+      case 'gold': {
+        const sel = zeroRes(), bank = { ...G.bank };
+        const need = Math.min(G.goldNeed[pid], RES.reduce((s, r) => s + G.bank[r], 0));
+        for (let i = 0; i < need; i++) { const r = RES.find(x => bank[x] > 0); bank[r]--; sel[r]++; }
+        chooseGold(pid, sel);
+        break;
+      }
       case 'roll': rollDice(); break;
       case 'discard': {
         const sel = zeroRes(), tmp = { ...P(pid).res };

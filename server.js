@@ -153,7 +153,7 @@ setInterval(() => {
 }, 25000);
 
 // ============================ Motor del juego ============================
-const GAME_SCRIPTS = ['board', 'game', 'variants', 'ai'].map(f =>
+const GAME_SCRIPTS = ['board', 'game', 'variants', 'seafarers', 'ai'].map(f =>
   new vm.Script(fs.readFileSync(path.join(ROOT, 'js', f + '.js'), 'utf8'), { filename: f + '.js' }));
 
 function makeEngine() {
@@ -167,7 +167,7 @@ function makeEngine() {
 const BASE = makeEngine();
 const COLORS = BASE.call('PLAYER_COLORS.map(c => c.hex)');
 const RES = BASE.call('RES');
-const EXPANSIONS_READY = []; // se irán añadiendo: 'seafarers', 'ck', 'tb'
+const EXPANSIONS_READY = ['seafarers']; // se irán añadiendo: 'ck', 'tb'
 const AI_NAMES = ['Bruno', 'Carla', 'Diego', 'Elena', 'Fede', 'Gala', 'Hugo', 'Irene'];
 
 // ============================ Salas ============================

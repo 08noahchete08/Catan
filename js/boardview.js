@@ -45,7 +45,11 @@ function seeded(seed) {
 function computeView() {
   setViewParams();
   const xs = [], ys = [];
-  G.vertices.forEach(v => { const p = pr(v.x, v.y); xs.push(p[0]); ys.push(p[1]); });
+  // En Navegantes se encuadra la tierra y una franja de mar alrededor
+  const shown = G.seafarers
+    ? G.hexes.filter(h => h.terrain !== 'mar' || h.neighbors.some(n => G.hexes[n].terrain !== 'mar'))
+    : G.hexes;
+  shown.forEach(h => h.vertices.forEach(id => { const v = G.vertices[id]; const p = pr(v.x, v.y); xs.push(p[0]); ys.push(p[1]); }));
   G.ports.forEach(p => { const q = pr(p.x, p.y); xs.push(q[0]); ys.push(q[1]); });
   const pad = 30;
   const minX = Math.min(...xs) - pad;
@@ -112,6 +116,21 @@ const ART = {
     <path d="M-6 -9 H-1 M6 -12 H1" stroke="#3f8f50" stroke-width="4" stroke-linecap="round"/>
     <rect x="-2.6" y="-21" width="5.2" height="21" rx="2.6" fill="#4ea35f"/>
     <rect x="0" y="-20" width="2.6" height="19" rx="1.3" fill="#3a7f49"/>`, flip),
+  river: (x, y, s) => g(x, y, s, `
+    <path d="M-34 -8 Q-18 -18 -4 -6 T26 -4 T44 -14" stroke="#3d93c9" stroke-width="7" fill="none" stroke-linecap="round" opacity=".9"/>
+    <path d="M-34 -8 Q-18 -18 -4 -6 T26 -4 T44 -14" stroke="#9fd6f5" stroke-width="2" fill="none" stroke-linecap="round" stroke-dasharray="4 6"/>`),
+  goldpile: (x, y, s) => g(x, y, s, `
+    <ellipse cy="1" rx="11" ry="3" fill="${SHADOW}"/>
+    <ellipse cx="-4" cy="-3" rx="5" ry="3.5" fill="#d9a514" stroke="#8a6200" stroke-width=".8"/>
+    <ellipse cx="4" cy="-3" rx="5" ry="3.5" fill="#f2c230" stroke="#8a6200" stroke-width=".8"/>
+    <ellipse cx="0" cy="-7.5" rx="5" ry="3.5" fill="#ffd84d" stroke="#8a6200" stroke-width=".8"/>
+    <path d="M-1 -10 L1 -12 M3 -9 L5 -10" stroke="#fff7c2" stroke-width="1.2" stroke-linecap="round"/>`),
+  ingots: (x, y, s) => g(x, y, s, `
+    <ellipse cy="1" rx="12" ry="3" fill="${SHADOW}"/>
+    <path d="M-11 0 L-8 -5 H0 L3 0 Z" fill="#e0ad1a" stroke="#8a6200" stroke-width=".8"/>
+    <path d="M1 0 L4 -5 H11 L13 0 Z" fill="#f2c230" stroke="#8a6200" stroke-width=".8"/>
+    <path d="M-5 -5 L-2 -10 H6 L8 -5 Z" fill="#ffd84d" stroke="#8a6200" stroke-width=".8"/>
+    <path d="M-1 -9 H4" stroke="#fff7c2" stroke-width="1"/>`),
   dune: (x, y, s, flip) => g(x, y, s, `
     <path d="M-19 0 Q-7 -10 4 -4 Q12 -9 19 0 Z" fill="#dcc48c"/>
     <path d="M4 -4 Q12 -9 19 0 L9 0 Q8 -3 4 -4 Z" fill="#c8ad6f"/>
@@ -128,6 +147,8 @@ const LAYOUT = {
           ['sheep', -25, -21, 1], ['sheep', 24, -27, .95], ['sheep', 31, 25, .9]],
   campo: [['sheaf', -31, -13, 1], ['sheaf', -12, -35, .95], ['sheaf', 12, -35, 1], ['sheaf', 31, -13, .95],
           ['sheaf', -33, 23, .9], ['sheaf', 33, 25, .9], ['sheaf', 0, 44, .75]],
+  oro: [['river', -4, -14, 1], ['goldpile', -24, -20, 1], ['goldpile', 24, -24, .9], ['ingots', -30, 22, 1], ['ingots', 30, 24, .9], ['goldpile', 0, 44, .7]],
+  mar: [],
   desierto: [['dune', -20, -22, 1], ['dune', 22, 26, 1.1], ['cactus', 22, -22, 1], ['cactus', -25, 24, .9], ['dune', -30, 6, .7]],
 };
 
@@ -162,6 +183,28 @@ function citySvg(x, y, c) {
   </g>`;
 }
 
+function shipSvg(x, y, c, cls = 'piece') {
+  return `<g transform="translate(${f1(x)},${f1(y)}) scale(1.1)" class="${cls}">
+    <ellipse cy="5" rx="12" ry="3" fill="rgba(0,0,0,.3)"/>
+    <path d="M-12 0 H12 L8 6 H-8 Z" fill="${shade(c, -.35)}" stroke="#111" stroke-width="1" stroke-linejoin="round"/>
+    <line x1="0" y1="0" x2="0" y2="-19" stroke="#3b2a12" stroke-width="1.6"/>
+    <path d="M1.2 -18 L11 -3 H1.2 Z" fill="${c}" stroke="#111" stroke-width=".8" stroke-linejoin="round"/>
+    <path d="M-1.2 -14 L-8 -3 H-1.2 Z" fill="${shade(c, .3)}" stroke="#111" stroke-width=".8" stroke-linejoin="round"/>
+  </g>`;
+}
+
+function pirateSvg(x, y) {
+  return `<g transform="translate(${f1(x)},${f1(y)}) scale(1.35)" class="robber">
+    <ellipse cy="6" rx="15" ry="3.5" fill="rgba(0,0,0,.35)"/>
+    <path d="M-14 0 H14 L9 7 H-9 Z" fill="#2b2118" stroke="#000" stroke-width="1"/>
+    <line x1="0" y1="0" x2="0" y2="-22" stroke="#1a120b" stroke-width="1.8"/>
+    <path d="M1.2 -20 L12 -4 H1.2 Z" fill="#2d2d33" stroke="#000" stroke-width=".8"/>
+    <path d="M-1.2 -17 L-10 -4 H-1.2 Z" fill="#3c3c44" stroke="#000" stroke-width=".8"/>
+    <path d="M0 -22 H-8 V-17 H0 Z" fill="#111"/>
+    <circle cx="-4" cy="-19.8" r="1.4" fill="#fff"/>
+    <title>Pirata</title></g>`;
+}
+
 function robberSvg(x, y) {
   return `<g transform="translate(${f1(x)},${f1(y)})" class="robber">
     <ellipse cy="2" rx="11" ry="4" fill="rgba(0,0,0,.4)"/>
@@ -174,16 +217,22 @@ function robberSvg(x, y) {
 function renderBoard() {
   setViewParams();
   const a = humanActor();
-  let vT = [], eT = [], cT = [], hT = false;
+  let vT = [], eT = [], cT = [], sT = [], msT = [], hT = false;
   if (a != null) {
+    const me = P(a);
     if (G.phase === 'setup-settlement') vT = settlementSpots(a, true);
-    else if (G.phase === 'setup-road') eT = roadSpots(a, G.lastSettlement);
-    else if (G.phase === 'road-building') eT = roadSpots(a);
+    else if (G.phase === 'setup-road') { eT = roadSpots(a, G.lastSettlement); sT = shipSpots(a, G.lastSettlement); }
+    else if (G.phase === 'road-building') { eT = me.roads > 0 ? roadSpots(a) : []; sT = me.ships > 0 ? shipSpots(a) : []; }
     else if (G.phase === 'robber') hT = true;
     else if (canBuildNow(a)) {
       if (UI.mode === 'camino') eT = roadSpots(a);
       else if (UI.mode === 'poblado') vT = settlementSpots(a, false);
       else if (UI.mode === 'ciudad') cT = citySpots(a);
+      else if (UI.mode === 'barco') sT = shipSpots(a);
+      else if (UI.mode === 'mover') {
+        if (UI.moveFrom == null) msT = movableShips(a);
+        else sT = shipMoveTargets(a, UI.moveFrom);
+      }
     }
   }
   const K = VIEW.k, T = VIEW.t, is3d = view3d();
@@ -206,6 +255,8 @@ function renderBoard() {
     <pattern id="tex-pasto" width="9" height="9" patternUnits="userSpaceOnUse"><path d="M2 7 L3 4 M6 8 L6.5 5" stroke="#6ea33f" stroke-width="1.1"/></pattern>
     <pattern id="tex-campo" width="9" height="9" patternUnits="userSpaceOnUse" patternTransform="rotate(-25)"><rect width="9" height="3.5" fill="#f3d26a"/></pattern>
     <pattern id="tex-montana" width="12" height="12" patternUnits="userSpaceOnUse"><circle cx="3" cy="4" r="1.5" fill="#5d636b"/><circle cx="9" cy="9" r="1" fill="#babfc6"/></pattern>
+    <pattern id="tex-oro" width="14" height="14" patternUnits="userSpaceOnUse"><path d="M3 3 l1 2 l2 1 l-2 1 l-1 2 l-1 -2 l-2 -1 l2 -1 Z" fill="#fff3b0"/><circle cx="10" cy="10" r="1" fill="#fff3b0"/></pattern>
+    <pattern id="tex-mar" width="20" height="10" patternUnits="userSpaceOnUse"><path d="M0 5 Q5 2 10 5 T20 5" stroke="#9fd3f2" stroke-width="1" fill="none"/></pattern>
     <pattern id="tex-desierto" width="22" height="10" patternUnits="userSpaceOnUse"><path d="M0 6 Q5.5 2 11 6 T22 6" stroke="#cdb37a" stroke-width="1.1" fill="none"/></pattern>`;
   for (const [id, t] of Object.entries(TERRAIN)) {
     defs += `<linearGradient id="top-${id}" x1="0" y1="0" x2=".35" y2="1">
@@ -234,7 +285,11 @@ function renderBoard() {
     </g>`);
   }
 
-  const byY = G.hexes.slice().sort((p, q) => p.y - q.y);
+  const byY = G.hexes.filter(h => h.terrain !== 'mar').sort((p, q) => p.y - q.y);
+  for (const h of G.hexes) {
+    if (h.terrain !== 'mar') continue;
+    out.push(`<polygon points="${polyStr(hexCorners(h.x, h.y, HEX_R - 1))}" class="sea-hex"/>`);
+  }
 
   // --- Base de arena con grosor (el «marco» de la isla) ---
   for (const h of byY) {
@@ -304,6 +359,17 @@ function renderBoard() {
 
   // --- Ladrón y edificios, de atrás hacia delante ---
   const pieces = [];
+  for (const e of G.edges) {
+    if (e.ship == null) continue;
+    const [a1, b1] = e.v.map(id => G.vertices[id]);
+    const [x, y] = pr((a1.x + b1.x) / 2, (a1.y + b1.y) / 2);
+    pieces.push({ y, svg: shipSvg(x, y + 3, P(e.ship).color) + `<title>Barco de ${esc(P(e.ship).name)}</title>` });
+  }
+  if (G.pirate != null) {
+    const ph = G.hexes[G.pirate];
+    const [x, y] = pr(ph.x, ph.y);
+    pieces.push({ y, svg: pirateSvg(x, y + 6) });
+  }
   const rh = G.hexes[G.robber];
   const [rx, ry] = pr(rh.x - (rh.number ? 33 : 0), rh.y + (rh.number ? 8 : 4));
   pieces.push({ y: ry, svg: robberSvg(rx, ry) });
@@ -324,8 +390,31 @@ function renderBoard() {
     const [x, y] = pr(G.vertices[vid].x, G.vertices[vid].y);
     out.push(`<ellipse cx="${f1(x)}" cy="${f1(y - 6)}" rx="20" ry="20" class="v-target city" data-v="${vid}"/>`);
   }
+  for (const eid of sT) {
+    const e = G.edges[eid];
+    const [a1, b1] = e.v.map(id => G.vertices[id]);
+    let mx = (a1.x + b1.x) / 2, my = (a1.y + b1.y) / 2;
+    const seaHex = e.hexes.map(id => G.hexes[id]).find(h => h.terrain === 'mar');
+    if (seaHex && e.land) { mx += (seaHex.x - mx) * .28; my += (seaHex.y - my) * .28; }
+    const [x, y] = pr(mx, my);
+    out.push(`<g class="ship-target" data-s="${eid}"><circle cx="${f1(x)}" cy="${f1(y)}" r="11"/><text x="${f1(x)}" y="${f1(y + 4)}">⛵</text><title>Construir un barco aquí</title></g>`);
+  }
+  for (const eid of msT) {
+    const [a1, b1] = G.edges[eid].v.map(id => G.vertices[id]);
+    const [x, y] = pr((a1.x + b1.x) / 2, (a1.y + b1.y) / 2);
+    out.push(`<circle cx="${f1(x)}" cy="${f1(y - 5)}" r="15" class="v-target ship-pick" data-ms="${eid}"><title>Mover este barco</title></circle>`);
+  }
+  if (UI.mode === 'mover' && UI.moveFrom != null && G.edges[UI.moveFrom]) {
+    const [a1, b1] = G.edges[UI.moveFrom].v.map(id => G.vertices[id]);
+    const [x, y] = pr((a1.x + b1.x) / 2, (a1.y + b1.y) / 2);
+    out.push(`<circle cx="${f1(x)}" cy="${f1(y - 5)}" r="16" class="ship-selected"/>`);
+  }
   if (hT) {
     for (const h of G.hexes) {
+      if (G.seafarers && pirateAllowed(h.id)) {
+        out.push(`<polygon points="${polyStr(hexCorners(h.x, h.y, HEX_R - 4))}" class="hex-hit pirate-hit" data-h="${h.id}"><title>Mover el pirata aquí</title></polygon>`);
+        continue;
+      }
       if (!robberAllowed(h.id, a)) continue;
       out.push(`<polygon points="${polyStr(hexCorners(h.x, h.y, HEX_R - 4))}" class="hex-hit" data-h="${h.id}"><title>${hexName(h)}</title></polygon>`);
     }
