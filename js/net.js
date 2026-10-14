@@ -258,7 +258,7 @@ function renderLobby() {
 
 function onNetChange(e) {
   if (e.target.id === 'lobby-color') wsSend({ t: 'color', color: e.target.value });
-  else if (/^lobby-(vp|mode5|cut|speed|var-|exp-)/.test(e.target.id)) {
+  else if (/^lobby-(vp|mode5|cut|speed|var-|exp-|tbsc)/.test(e.target.id)) {
     exclusiveExpansions(e);
     wsSend({ t: 'options', ...readRules('lobby'), speed: +$('#lobby-speed').value });
   }

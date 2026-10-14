@@ -5,6 +5,13 @@
 
 const AI_WEIGHT = { madera: 1.05, arcilla: 1.05, lana: 0.9, trigo: 1.05, mineral: 1.0 };
 
+// Distancia (en aristas) entre dos aristas del tablero
+function edgeDistance(a, b) {
+  if (a === b) return 0;
+  const d = bkReach(a, 30);
+  return d.has(b) ? d.get(b) : 99;
+}
+
 const AI = {
   production(pid) {
     const prod = zeroRes();
@@ -91,7 +98,7 @@ const AI = {
       for (const eid of vv.edges) {
         const e = G.edges[eid];
         if (e.road !== null || e.ship != null) continue;
-        const ok = cur.mode === 'r' ? canR && e.land !== false : canS && e.sea && !nearPirate(e);
+        const ok = cur.mode === 'r' ? canR && e.land !== false && !e.river : canS && e.sea && !nearPirate(e);
         if (!ok) continue;
         const nv = e.v[0] === cur.v ? e.v[1] : e.v[0];
         push(nv, cur.mode, cur.first === null ? eid : cur.first, cur.first === null ? cur.mode : cur.kind, cur.d + 1);
@@ -327,6 +334,7 @@ const AI = {
 
   mainStep(pid) {
     if (G.ck && AI.ckStep(pid)) return true;
+    if (G.tb && AI.tbStep(pid)) return true;
     if (AI.tryDev(pid)) return true;
     if (AI.buildBest(pid, true)) return true;
     const g = AI.goal(pid);
@@ -464,11 +472,82 @@ const AI = {
       case 'flota': choice = o.sort((a, b) => P(pid).res[b] - P(pid).res[a])[0]; break;
       case 'monopolioRecursos': case 'monopolioComercio': choice = o.sort((a, b) => othersHave(b) - othersHave(a))[0]; break;
       case 'mercader': choice = o.sort((a, b) => pips(G.hexes[b].number) - pips(G.hexes[a].number))[0]; break;
+      case 'fish3': choice = o.sort((a, b) => total(P(b).res) - total(P(a).res))[0]; break;
+      case 'fish4': {
+        const g = AI.goal(pid), cost = g ? AI.costOf(g) : {};
+        choice = o.sort((a, b) => ((cost[b] || 0) - P(pid).res[b]) - ((cost[a] || 0) - P(pid).res[a]))[0];
+        break;
+      }
+      case 'camello': choice = o.sort((a, b) => AI.camelValue(pid, b) - AI.camelValue(pid, a))[0]; break;
       case 'diplomatico':
         if (pd.step === 1) choice = o.find(e => G.edges[e].road !== pid && G.edges[e].road === G.longestHolder) ?? o.find(e => G.edges[e].road !== pid) ?? o[0];
         break;
     }
     return resolvePending(pid, choice);
+  },
+
+  // ---------- Mercaderes y Bárbaros ----------
+  tbStep(pid) {
+    const p = P(pid);
+    if (G.tb === 'pescadores') {
+      if (p.boot) {
+        const t = opponents(pid).filter(o => vp(o) >= vp(pid));
+        if (t.length && passBoot(pid, t[0])) return true;
+      }
+      if (canUseFish(pid, 7)) return useFish(pid, 7);
+      if (canUseFish(pid, 2) && AI.robberOnMe(pid)) return useFish(pid, 2);
+      const g = AI.goal(pid);
+      if (g && canUseFish(pid, 4) && AI.missing(p.res, AI.costOf(g)) > 0 && fishTotal(pid) >= 5) return useFish(pid, 4);
+    }
+    if ((G.tb === 'rios' && p.gold >= 5) || (G.tb === 'barbaros' && p.gold >= 2)) {
+      const g = AI.goal(pid);
+      if (g) {
+        const need = RES.find(r => (AI.costOf(g)[r] || 0) > p.res[r] && G.bank[r] > 0);
+        if (need && buyWithGold(pid, need)) return true;
+      }
+    }
+    if (G.tb === 'rios' && canAfford(pid, BRIDGE_COST) && p.roads > 0 && total(p.res) >= 6) {
+      const b = bridgeSpots(pid);
+      if (b.length && buildBridge(pid, b[0])) return true;
+    }
+    if (G.tb === 'barbaros') {
+      for (const k of G.bknights.filter(x => x.owner === pid && x.mp > 0)) {
+        const near = h => h.barbs > 0 && h.edges.includes(k.edge);
+        if (G.hexes.some(near)) continue;
+        const goal = G.hexes.filter(h => h.barbs > 0).sort((a, b) => b.barbs - a.barbs)[0];
+        if (!goal) break;
+        const dist = bkReach(k.edge, 12);
+        const free = goal.edges.filter(e => !G.bknights.some(x => x.edge === e) && dist.has(e)).sort((a, b) => dist.get(a) - dist.get(b));
+        if (!free.length) continue;
+        // Avanza lo más posible hacia la arista elegida
+        const targets = bkMoveTargets(pid, k.edge);
+        const toward = targets.sort((a, b) => edgeDistance(a, free[0]) - edgeDistance(b, free[0]))[0];
+        if (toward !== undefined && edgeDistance(toward, free[0]) < edgeDistance(k.edge, free[0]) && moveBKnight(pid, k.edge, toward)) return true;
+      }
+    }
+    return false;
+  },
+
+  vote(pid) {
+    const spots = camelSpots();
+    const mine = spots.some(e => G.edges[e].v.some(v => G.vertices[v].adj.concat([v]).some(a => {
+      const b = G.vertices[a].building;
+      return b && b.owner === pid;
+    })));
+    const p = P(pid);
+    const want = mine ? 2 : 0;
+    const lana = Math.min(p.res.lana, want), trigo = Math.min(p.res.trigo, want - lana);
+    return castVote(pid, { lana, trigo });
+  },
+
+  camelValue(pid, eid) {
+    let s = Math.random() * 0.1;
+    for (const vid of G.edges[eid].v) {
+      const b = G.vertices[vid].building;
+      if (b) s += b.owner === pid ? 3 : -2;
+      if (G.edges[eid].road === pid) s += 1;
+    }
+    return s;
   },
 
   // Acción del jugador en pareja: construir, comerciar con el banco y una carta
@@ -500,6 +579,7 @@ const AI = {
         break;
       }
       case 'gold': ok = AI.chooseGold(pid); break;
+      case 'vote': ok = AI.vote(pid); break;
       case 'roll':
         ok = (G.ck && progressPlayable(pid, 'alquimista') && playProgress(pid, 'alquimista')) ||
           (AI.robberOnMe(pid) && playKnight(pid)) || rollDice();

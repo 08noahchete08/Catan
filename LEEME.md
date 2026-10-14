@@ -16,7 +16,11 @@ Al crear la partida (local u online) se puede elegir:
 - **Expansiones** (una a la vez):
   - **Navegantes de Catán:** mapa con isla principal e islas nuevas generado al azar, barcos (madera + lana), mover un barco por turno, ríos de oro, pirata y +2 puntos por colonizar cada isla nueva. Recomendado: 12-14 puntos.
   - **Ciudades y Caballeros:** mercancías (papel, tela, moneda), dado de eventos, ataques de los bárbaros, caballeros (construir, ascender, activar, mover, desplazar y expulsar al ladrón), mejoras de ciudad con sus habilidades, metrópolis, murallas y las 54 cartas de progreso. Recomendado: 13 puntos.
-  - Mercaderes y Bárbaros: en preparación.
+  - **Mercaderes y Bárbaros** (un escenario a elegir):
+    - **Pescadores de Catán:** lago y caladeros dan fichas de pescado para mover el ladrón (2), robar (3), tomar un recurso (4), construir un camino (5) o tomar una carta de desarrollo (7). Quien tenga la bota vieja necesita 1 punto más.
+    - **Ríos de Catán:** construir junto a los ríos da monedas y los puentes (2 arcilla + 1 madera) dan 3. Con 2 monedas se compra un recurso. El más rico gana 1 punto; los más pobres pierden 2.
+    - **Caravanas:** tras cada poblado o ciudad se vota con trigo y lana dónde va un camello. Los edificios en una ruta de camellos valen +1 y esos caminos cuentan doble para la Gran Ruta.
+    - **Ataque de los bárbaros:** cada poblado o ciudad atrae 3 bárbaros a la costa; con 3 un hexágono queda conquistado. Las cartas de Caballero despliegan caballeros en el castillo, que mueven 3 pasos (+2 con trigo) y capturan bárbaros (2 prisioneros = 1 punto).
 
 ## Jugar en local
 

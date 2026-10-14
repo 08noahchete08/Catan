@@ -54,6 +54,7 @@ function newGame(setup, opts) {
   const cfg = CONFIGS[n > 4 ? 'ext' : 'base'];
   const seafarers = opts.expansion === 'seafarers';
   const ck = opts.expansion === 'ck';
+  const tb = opts.expansion === 'tb' ? (TB_SCENARIOS[opts.tbScenario] ? opts.tbScenario : 'pescadores') : null;
   const board = seafarers ? generateSeaBoard(n) : generateBoard(cfg);
   const start = rand(n);
   const order = [];
@@ -79,7 +80,7 @@ function newGame(setup, opts) {
     // Reglas para 5-6 jugadores: 'paired' (turnos en pareja, 2023), 'special' (fase especial clásica) o 'none'
     mode5: n > 4 && ['paired', 'special', 'none'].includes(opts.mode5) ? opts.mode5 : (n > 4 && opts.mode5 == null ? 'paired' : 'none'),
     partner: null, pairedActive: false,
-    expansion: seafarers ? 'seafarers' : ck ? 'ck' : 'none', seafarers, ck, pending: null,
+    expansion: seafarers ? 'seafarers' : ck ? 'ck' : tb ? 'tb' : 'none', seafarers, ck, tb, pending: null,
     goldNeed: {}, goldQueue: [], afterGold: null, shipMoved: false,
     variants: cleanVariants(opts.variants), harborHolder: null, eventDeck: null, newYearAt: 0, epidemic: false, lastEvent: null,
     phase: 'setup-settlement',
@@ -94,7 +95,8 @@ function newGame(setup, opts) {
   };
   annotateBoard();
   if (ck) initCK();
-  log(`Nueva partida: ${n} jugadores, ${seafarers ? '⛵ Navegantes de Catán' : ck ? '🏰 Ciudades y Caballeros' : `tablero ${cfg.id === 'ext' ? 'ampliado (5-6)' : 'básico'}`}. Empieza ${pname(order[0])}.`);
+  if (tb) setupTB();
+  log(`Nueva partida: ${n} jugadores, ${seafarers ? '⛵ Navegantes de Catán' : ck ? '🏰 Ciudades y Caballeros' : tb ? `${TB_SCENARIOS[tb].icon} ${TB_SCENARIOS[tb].name}` : `tablero ${cfg.id === 'ext' ? 'ampliado (5-6)' : 'básico'}`}. Empieza ${pname(order[0])}.`);
 }
 
 // Jugador controlado por la IA (de forma permanente o porque se ha desconectado)
@@ -113,6 +115,7 @@ function actor() {
   if (G.phase === 'discard') return G.discardQueue[0];
   if (G.phase === 'special-build') return G.specialBuilder;
   if (G.phase === 'gold') return G.goldQueue[0];
+  if (G.phase === 'vote') return G.voteQueue[0];
   return activePlayer();
 }
 
@@ -124,6 +127,7 @@ function vp(pid, includeHidden = true) {
   if (G.harborHolder === pid) s += 2;
   s += (P(pid).islands || []).length * 2;
   if (G.ck) s += vpCK(pid);
+  if (G.tb) s += vpTB(pid);
   if (includeHidden) s += P(pid).dev.filter(d => d.type === 'puntos').length;
   return s;
 }
@@ -164,7 +168,7 @@ function validSettlementSpot(pid, vid, ignoreRoad) {
 
 function validRoadSpot(pid, eid, fromVertex) {
   const e = G.edges[eid];
-  if (e.road !== null || e.ship != null || e.land === false) return false;
+  if (e.road !== null || e.ship != null || e.land === false || e.river) return false;
   if (fromVertex != null) return e.v.includes(fromVertex);
   return e.v.some(vid => {
     const v = G.vertices[vid];
@@ -202,6 +206,7 @@ function buildSettlement(pid, vid) {
   log(`${pname(pid)} construye ${asCity ? 'una ciudad' : 'un poblado'}${v.port ? ' en un puerto' : ''}.`);
   updateHarbormaster();
   if (!setup) claimIsland(pid, vid);
+  if (G.tb) tbOnSettlement(pid, vid, setup);
   if (setup) {
     G.lastSettlement = vid;
     if (G.setupIdx >= G.players.length) {
@@ -233,6 +238,7 @@ function buildCity(pid, vid) {
   p.cities--; p.settlements++;
   log(`${pname(pid)} mejora un poblado a ciudad.`);
   updateHarbormaster();
+  if (G.tb) tbOnBuilding();
   checkWin();
   return true;
 }
@@ -240,6 +246,7 @@ function buildCity(pid, vid) {
 function placeRoad(pid, eid) {
   G.edges[eid].road = pid;
   P(pid).roads--;
+  if (G.tb) tbOnRoad(pid, eid);
 }
 
 function buildRoad(pid, eid) {
@@ -334,6 +341,7 @@ function rollDice() {
     if (G.discardQueue.length) log(`Los jugadores con demasiadas cartas deben descartar la mitad.`);
   } else {
     if (G.ck) produceCK(s); else produce(s);
+    if (G.tb === 'pescadores') produceFish(s);
     G.epidemic = false;
     G.phase = 'main';
     startGold('main');
@@ -345,7 +353,7 @@ function produce(n) {
   const demand = {};
   RES.forEach(r => { demand[r] = {}; });
   for (const h of G.hexes) {
-    if (h.number !== n || h.id === G.robber) continue;
+    if (h.number !== n || h.id === G.robber || h.conquered) continue;
     const r = TERRAIN[h.terrain].res;
     if (TERRAIN[h.terrain].gold) {
       for (const vid of h.vertices) {
@@ -474,6 +482,10 @@ function useDev(pid, type) {
 function playKnight(pid) {
   if (!playableDev(pid, 'caballero')) return false;
   useDev(pid, 'caballero');
+  if (G.tb === 'barbaros') {
+    setPending(pid, 'bkDeploy', 'edge', castleEdges(), 'Elige junto al castillo dónde despliegas el caballero');
+    return true;
+  }
   P(pid).knights++;
   updateLargestArmy(pid);
   G.afterRobber = G.phase;
@@ -631,6 +643,13 @@ function applyAction(pid, a) {
   if (G.pending && a.type !== 'pick' && a.type !== 'pick-skip') return false;
   switch (a.type) {
     case 'pick': return resolvePending(pid, a.value);
+    case 'fish': return useFish(pid, a.use);
+    case 'pass-boot': return passBoot(pid, a.to);
+    case 'bridge': return buildBridge(pid, e);
+    case 'gold-buy': return buyWithGold(pid, a.r);
+    case 'vote': return castVote(pid, a.bid);
+    case 'bk-move': return moveBKnight(pid, toInt(a.from), toInt(a.to));
+    case 'bk-boost': return boostKnight(pid, e);
     case 'pick-skip': return skipPending(pid);
     case 'ck-knight': return !!G.vertices[v] && buildKnight(pid, v);
     case 'ck-promote': return !!G.vertices[v] && promoteKnight(pid, v);
@@ -739,6 +758,7 @@ function nextTurn() {
   G.aiOffers = 0;
   G.trade = null;
   if (G.ck) ckTurnReset();
+  if (G.tb) tbTurnReset();
   checkWin();
   checkDeadlock();
 }
@@ -748,6 +768,7 @@ function nextTurn() {
 function canGainPoints(pid) {
   const p = P(pid);
   if (G.ck) return true;
+  if (G.tb === 'barbaros' && G.hexes.some(h => h.barbs) && G.bknights.length) return true;
   if (G.devDeck.length) return true;
   if (p.cities > 0 && citySpots(pid).length) return true;
   if (p.settlements > 0 && (settlementSpots(pid, false).length || AI.roadTarget(pid))) return true;
@@ -767,7 +788,7 @@ function checkWin() {
   if (G.phase === 'gameover') return;
   if (G.phase === 'setup-settlement' || G.phase === 'setup-road') return;
   const pid = activePlayer();
-  if (vp(pid) >= G.winPoints) {
+  if (vp(pid) >= (G.tb ? winTarget(pid) : G.winPoints)) {
     G.winner = pid;
     G.phase = 'gameover';
     log(`🏆 ¡${pname(pid)} alcanza ${vp(pid)} puntos y gana la partida!`);
@@ -791,8 +812,9 @@ function longestRoadFor(pid) {
       if (last && k !== last && !own(vid)) continue;
       const nv = e.v[0] === vid ? e.v[1] : e.v[0];
       used.add(eid);
-      if (blocked(nv)) { if (len + 1 > best) best = len + 1; }
-      else dfs(nv, len + 1, k);
+      const w = e.camel ? 2 : 1;
+      if (blocked(nv)) { if (len + w > best) best = len + w; }
+      else dfs(nv, len + w, k);
       used.delete(eid);
     }
   }

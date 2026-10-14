@@ -90,7 +90,7 @@ const MODE5_NAMES = {
   special: 'Fase especial de construcción (clásica)',
   none: 'Sin regla extra',
 };
-const DEFAULT_RULES = { winPoints: 10, mode5: 'paired', cutRoads: true, variants: {}, expansion: 'none' };
+const DEFAULT_RULES = { winPoints: 10, mode5: 'paired', cutRoads: true, variants: {}, expansion: 'none', tbScenario: 'pescadores' };
 
 // Interruptor on/off accesible (casilla con aspecto de interruptor)
 function toggleHtml(id, icon, title, desc, on, disabled, extra = '') {
@@ -105,7 +105,7 @@ function toggleHtml(id, icon, title, desc, on, disabled, extra = '') {
 const EXPANSIONS = {
   seafarers: { name: 'Navegantes de Catán', icon: '⛵', desc: 'Barcos, islas nuevas (+2 puntos), ríos de oro y el pirata. Recomendado: 12-14 puntos.', ready: true },
   ck: { name: 'Ciudades y Caballeros', icon: '🏰', desc: 'Mercancías, caballeros, bárbaros, mejoras de ciudad, metrópolis y cartas de progreso. Recomendado: 13 puntos.', ready: true },
-  tb: { name: 'Mercaderes y Bárbaros', icon: '🐪', desc: 'Pescadores, ríos, caravanas y ataque bárbaro.', ready: false },
+  tb: { name: 'Mercaderes y Bárbaros', icon: '🐪', desc: 'Elige un escenario: pescadores, ríos, caravanas o ataque de los bárbaros.', ready: true },
 };
 
 function rulesFields(prefix, r, n, editable) {
@@ -129,6 +129,9 @@ function rulesFields(prefix, r, n, editable) {
     <div class="rules-section">Expansiones <small>(solo una a la vez)</small></div>
     ${Object.entries(EXPANSIONS).map(([k, x]) => toggleHtml(`${prefix}-exp-${k}`, x.icon, x.name, x.desc,
       r.expansion === k, dis || !x.ready, x.ready ? '' : ' <span class="soon">pronto</span>')).join('')}
+    ${r.expansion === 'tb' ? `<label class="field-row">🗺️ Escenario <select id="${prefix}-tbsc" ${dis ? 'disabled' : ''}>${Object.entries(TB_SCENARIOS).map(([k, x]) =>
+      `<option value="${k}" ${k === r.tbScenario ? 'selected' : ''}>${x.icon} ${x.name}</option>`).join('')}</select></label>
+      <p class="muted small rule-help">${TB_SCENARIOS[r.tbScenario || 'pescadores'].desc}</p>` : ''}
   </div>`;
 }
 
@@ -144,7 +147,8 @@ function readRules(prefix) {
   const variants = {};
   for (const k of Object.keys(VARIANTS)) variants[k] = !!($(`#${prefix}-var-${k}`) || {}).checked;
   const exp = Object.keys(EXPANSIONS).find(k => ($(`#${prefix}-exp-${k}`) || {}).checked) || 'none';
-  return { winPoints: +vp.value, mode5: m.value, cutRoads: c.checked, variants, expansion: exp };
+  const sc = $(`#${prefix}-tbsc`);
+  return { winPoints: +vp.value, mode5: m.value, cutRoads: c.checked, variants, expansion: exp, tbScenario: sc ? sc.value : 'pescadores' };
 }
 
 // Las expansiones son excluyentes: al encender una se apagan las demás
@@ -273,9 +277,17 @@ function render() {
 // El dibujo del tablero está en boardview.js
 
 function onBoardClick(ev) {
-  const t = ev.target.closest('[data-v],[data-e],[data-h],[data-s],[data-ms],[data-kv],[data-pick]');
+  const t = ev.target.closest('[data-v],[data-e],[data-h],[data-s],[data-ms],[data-kv],[data-pick],[data-b],[data-bk]');
   if (!t || !G || humanActor() == null) return;
   if (t.dataset.pick != null) { send({ type: 'pick', value: +t.dataset.pick }); return; }
+  if (t.dataset.b != null) { send({ type: 'bridge', e: +t.dataset.b }); return; }
+  if (t.dataset.bk != null) {
+    const e = +t.dataset.bk;
+    if (UI.mode === 'bk-boost') send({ type: 'bk-boost', e });
+    else if (UI.bkFrom == null) { UI.bkFrom = e; render(); }
+    else { send({ type: 'bk-move', from: UI.bkFrom, to: e }); UI.bkFrom = null; }
+    return;
+  }
   if (t.dataset.kv != null) {
     const v = +t.dataset.kv;
     const kinds = { caballero: 'ck-knight', ascender: 'ck-promote', activar: 'ck-activate', expulsar: 'ck-chase', muralla: 'ck-wall' };
@@ -309,6 +321,9 @@ const CK_MODE_TEXT = {
   'mover-cab': () => UI.knightFrom == null ? 'elige el caballero activo que mueves' : 'elige adónde va (puedes desplazar a uno más débil)',
   expulsar: () => 'elige el caballero que expulsa al ladrón',
   muralla: () => 'elige la ciudad para la muralla',
+  puente: () => 'elige dónde construir el puente',
+  bk: () => UI.bkFrom == null ? 'elige el caballero que mueves' : 'elige adónde va',
+  'bk-boost': () => 'elige el caballero al que das trigo',
 };
 
 function renderBanner() {
@@ -324,6 +339,7 @@ function renderBanner() {
       case 'setup-settlement': txt = `${who}: coloca un poblado inicial ${G.setupIdx < G.players.length ? '(1ª ronda)' : '(2ª ronda: recibes recursos)'}`; break;
       case 'setup-road': txt = `${who}: coloca un camino${G.seafarers ? ' o un barco' : ''} junto a tu poblado`; break;
       case 'gold': txt = `${who}: elige ${G.goldNeed[a]} recurso(s) del río de oro`; break;
+      case 'vote': txt = `🐪 Votación del camello: vota ${who}`; break;
       case 'roll': txt = `${who}: tira los dados`; break;
       case 'discard': txt = `${who}: descarta ${G.discardNeed[a]} cartas`; break;
       case 'robber': txt = `${who}: mueve el ladrón ${mine ? '(clic en un hexágono)' : ''}`; break;
@@ -378,6 +394,7 @@ function renderPlayers() {
           ${G.ck ? `<span title="Fuerza de caballeros activos / total">🛡️ ${knightStrength(p.id)}/${knightStrength(p.id, false)}</span>
             <span title="Mejoras: comercio, política, ciencia">${Object.entries(TRACKS).map(([k, t]) => `${t.gate}${p.improve[k]}`).join(' ')}</span>
             <span title="Cartas de progreso">📘 ${p.progress.length}</span>` : ''}
+          ${G.tb ? vpTBLabel(p.id).map(x => `<span>${x}</span>`).join('') : ''}
           ${(p.islands || []).length ? `<span class="award" title="Islas nuevas colonizadas (+2 cada una)">🏝️ ${p.islands.length}</span>` : ''}
         </div>
       </div>
@@ -419,6 +436,7 @@ function renderTurnPanel() {
         html += `<button class="primary wide big" data-act="roll">🎲 Tirar dados</button>`;
         if (playableDev(a, 'caballero')) html += `<div class="hint">Puedes jugar un Caballero antes de tirar.</div>`;
         break;
+      case 'vote': html += `<button class="primary wide" data-act="reopen">🐪 Votar dónde va el camello</button>`; break;
       case 'discard': html += `<button class="primary wide" data-act="reopen">Descartar ${G.discardNeed[a]} cartas</button>`; break;
       case 'robber': html += `<div class="info">🦹 Haz clic en un hexágono para mover el ladrón.</div>`; break;
       case 'steal': html += `<button class="primary wide" data-act="reopen">Elegir a quién robar</button>`; break;
@@ -430,6 +448,7 @@ function renderTurnPanel() {
         if (G.pending) { html += pendingPanelHtml(); break; }
         html += buildButtons(a);
         if (G.ck) html += ckButtons(a);
+        if (G.tb) html += tbButtons(a);
         html += `<div class="btn-grid two">
           <button data-act="open-bank">🏦 Banco / puertos</button>
           <button data-act="open-trade">🤝 Comerciar${G.trade ? ' •' : ''}</button></div>
@@ -494,6 +513,50 @@ function ckButtons(a) {
     </div>`;
   }
   return html + '</div>';
+}
+
+// ---------- Mercaderes y Bárbaros ----------
+function tbButtons(a) {
+  const p = P(a);
+  let html = '';
+  if (G.tb === 'pescadores') {
+    html += `<div class="ck-title">Pescado <small>🐟 ${fishTotal(a)} en ${p.fishTokens.length} ficha(s)${p.boot ? ' · 👢 bota vieja' : ''}</small></div><div class="btn-grid">`;
+    for (const [n, u] of Object.entries(FISH_USES)) {
+      html += `<button class="build" data-act="fish" data-use="${n}" ${canUseFish(a, +n) ? '' : 'disabled'}><span>${u.icon} ${u.name}</span><span class="cost">${'🐟'.repeat(+n > 5 ? 1 : +n)}${+n > 5 ? '×' + n : ''}</span></button>`;
+    }
+    html += '</div>';
+    if (p.boot) {
+      const to = opponents(a).filter(o => vp(o) >= vp(a));
+      html += `<div class="small muted">Pasar la bota a: ${to.length ? to.map(o => `<button class="link" data-act="pass-boot" data-p="${o}">${esc(P(o).name)}</button>`).join(' ') : 'nadie tiene tantos puntos como tú'}</div>`;
+    }
+  }
+  if (G.tb === 'rios') {
+    const can = canAfford(a, BRIDGE_COST) && p.roads > 0 && bridgeSpots(a).length > 0;
+    html += `<div class="ck-title">Ríos <small>🪙 ${p.gold} monedas</small></div><div class="btn-grid">
+      <button class="build ${UI.mode === 'puente' ? 'active' : ''}" data-act="mode" data-kind="puente" ${can ? '' : 'disabled'}><span>🌉 Puente</span><span class="cost">${costIcons(BRIDGE_COST)} · +3 🪙</span></button></div>`;
+  }
+  if (G.tb === 'barbaros') {
+    const mine = G.bknights.filter(k => k.owner === a);
+    html += `<div class="ck-title">Caballeros <small>⛓️ ${p.prisoners} prisioneros · 🪙 ${p.gold}</small></div><div class="btn-grid">
+      <button class="build ${UI.mode === 'bk' ? 'active' : ''}" data-act="mode" data-kind="bk" ${mine.some(k => bkMoveTargets(a, k.edge).length) ? '' : 'disabled'}><span>🐎 Mover caballero</span><span class="cost">3 pasos por turno</span></button>
+      <button class="build ${UI.mode === 'bk-boost' ? 'active' : ''}" data-act="mode" data-kind="bk-boost" ${mine.some(k => !k.boosted) && p.res.trigo > 0 ? '' : 'disabled'}><span>🌾 +2 pasos</span><span class="cost">🌾</span></button></div>
+      <div class="small muted">Los caballeros se despliegan en el castillo jugando una carta de Caballero.</div>`;
+  }
+  if ((G.tb === 'rios' || G.tb === 'barbaros') && p.gold >= 2) {
+    html += `<div class="small muted gold-buy">Comprar con 2 🪙: ${RES.map(r => `<button class="link" data-act="gold-buy" data-r="${r}" ${G.bank[r] ? '' : 'disabled'}>${RES_INFO[r].icon}</button>`).join(' ')}</div>`;
+  }
+  return html;
+}
+
+function showVote(pid) {
+  if (UI.modal !== 'vote-' + pid) UI.voteSel = zeroRes();
+  const sel = UI.voteSel, p = P(pid);
+  const max = { ...zeroRes(), trigo: p.res.trigo, lana: p.res.lana };
+  openModal('vote-' + pid, `<h2>🐪 ${pname(pid)}: votación del camello</h2>
+    <p>Cada carta de trigo o lana es un voto. Quien más vote elige dónde va el camello (si hay empate, decide quien construyó). Los votos se pagan siempre.</p>
+    ${stepper('vsel', sel, max, ['trigo', 'lana'])}
+    <div class="modal-foot"><span class="counter ok">${total(sel)} voto(s)</span>
+    <button class="primary" data-act="vote-ok">Votar</button></div>`);
 }
 
 function progressHandHtml(v) {
@@ -597,6 +660,14 @@ function renderHand() {
   } else if (!G.ck) html += '<div class="muted small">Sin cartas de desarrollo.</div>';
 
   if (G.ck) html += progressHandHtml(v);
+  if (G.tb) {
+    const bits = [];
+    if (G.tb === 'pescadores') bits.push(`🐟 ${p.fishTokens.map(t => t || '?').join(' + ') || '0'} = ${fishTotal(v)} peces`);
+    if (p.boot) bits.push('👢 tienes la bota vieja (+1 punto para ganar)');
+    if (G.tb === 'rios' || G.tb === 'barbaros') bits.push(`🪙 ${p.gold} monedas`);
+    if (G.tb === 'barbaros') bits.push(`⛓️ ${p.prisoners} prisioneros`);
+    html += `<div class="small tb-hand">${bits.join(' · ')}</div>`;
+  }
   html += `<div class="pieces">Piezas: 🛤️ ${p.roads} · 🏠 ${p.settlements} · 🏰 ${p.cities}${G.seafarers ? ` · ⛵ ${p.ships}` : ''}</div>
     <div class="rates">Banco: ${handTypes().map(r => `<span>${RES_INFO[r].icon} ${bankRate(v, r)}:1</span>`).join('')}</div>`;
   $('#hand').innerHTML = html;
@@ -636,11 +707,12 @@ function syncModals() {
   if (G.phase === 'discard' && a != null) { if (UI.modal !== 'discard-' + a) showDiscard(a); return; }
   if (G.phase === 'steal' && a != null) { if (UI.modal !== 'steal') showSteal(); return; }
   if (G.phase === 'gold' && a != null) { if (UI.modal !== 'gold-' + a) showGold(a); return; }
+  if (G.phase === 'vote' && a != null) { if (UI.modal !== 'vote-' + a) showVote(a); return; }
   if (UI.online && G.trade && G.trade.from !== NET.seat && G.trade.responses[NET.seat] === null) {
     if (UI.modal !== 'trade-resp') showTradeResp();
     return;
   }
-  if (UI.modal && /^(discard|steal|offer|winner|trade-resp|gold|pending)/.test(UI.modal)) closeModal();
+  if (UI.modal && /^(discard|steal|offer|winner|trade-resp|gold|pending|vote)/.test(UI.modal)) closeModal();
   const myTurn = (G.phase === 'main' && a === G.current) || (G.phase === 'paired' && a === G.partner);
   if (['bank', 'yop', 'mono'].includes(UI.modal) && !myTurn) closeModal();
   if (UI.modal === 'trade' && !(G.phase === 'main' && a === G.current)) closeModal();
@@ -846,6 +918,9 @@ function showRules() {
     <li><b>Caballeros</b> (${costIcons(CK_COSTS.caballero)}): se colocan junto a tus caminos, se ascienden (${costIcons(CK_COSTS.ascender)}) y se activan con ${costIcons(CK_COSTS.activar)}. Activos pueden moverse, desplazar a uno más débil o expulsar al ladrón.</li>
     <li><b>Mejoras de ciudad</b> con mercancías (nivel n cuesta n). Nivel 3: Casa de comercio (2:1 mercancías), Fortaleza (caballeros poderosos) o Acueducto. Nivel 4: metrópolis (+2 puntos).</li>
     <li><b>Murallas</b> (${costIcons(CK_COSTS.muralla)}): +2 al límite de cartas cada una. El ladrón no actúa hasta el primer ataque. No hay cartas de desarrollo.</li></ul>
+    <h3>🐪 Mercaderes y Bárbaros</h3>
+    <ul>${Object.values(TB_SCENARIOS).map(x => `<li><b>${x.icon} ${x.name}:</b> ${x.desc}</li>`).join('')}</ul>
+    <p class="small muted">Pescadores: 2 peces devuelven el ladrón al lago, 3 roban un recurso, 4 toman uno del banco, 5 dan un camino y 7 una carta de desarrollo; quien tenga la bota vieja necesita 1 punto más. Ríos: el puente cuesta ${costIcons(BRIDGE_COST)}; 2 monedas compran un recurso. Bárbaros: un caballero mueve 3 pasos por turno (+2 con trigo) y si los caballeros alrededor de un hexágono superan a sus bárbaros, los capturan.</p>
     <h3>Opciones</h3>
     <p><b>Variantes:</b> ${Object.values(VARIANTS).map(v => `${v.icon} <b>${v.name}</b>: ${v.desc}`).join(' ')}</p>
     <p>Si con muchos puntos para ganar ya nadie puede conseguir más, la partida termina y gana quien más puntos tenga.</p>
@@ -888,7 +963,7 @@ function onClick(ev) {
   const a = humanActor();
   switch (act) {
     case 'roll': send({ type: 'roll' }); break;
-    case 'mode': UI.mode = UI.mode === t.dataset.kind ? null : t.dataset.kind; UI.moveFrom = null; UI.knightFrom = null; render(); break;
+    case 'mode': UI.mode = UI.mode === t.dataset.kind ? null : t.dataset.kind; UI.moveFrom = null; UI.knightFrom = null; UI.bkFrom = null; render(); break;
     case 'buy': send({ type: 'buy' }); break;
     case 'end-turn': send({ type: 'end-turn' }); break;
     case 'end-special': send({ type: 'end-special' }); break;
@@ -901,6 +976,11 @@ function onClick(ev) {
     case 'discard-ok': send({ type: 'discard', sel: UI.discardSel }); break;
     case 'gsel': UI.goldSel[r] += d; showGold(a); break;
     case 'improve': send({ type: 'ck-improve', track: t.dataset.track }); break;
+    case 'fish': send({ type: 'fish', use: +t.dataset.use }); break;
+    case 'pass-boot': send({ type: 'pass-boot', to: p }); break;
+    case 'gold-buy': send({ type: 'gold-buy', r }); break;
+    case 'vsel': UI.voteSel[r] += d; showVote(a); break;
+    case 'vote-ok': send({ type: 'vote', bid: { trigo: UI.voteSel.trigo, lana: UI.voteSel.lana } }); break;
     case 'play-progress': UI.alch = null; send({ type: 'progress', card: t.dataset.card }); break;
     case 'pick': send({ type: 'pick', value: G.pending && G.pending.kind === 'card' ? t.dataset.value : +t.dataset.value }); closeModal(); break;
     case 'pick-skip': send({ type: 'pick-skip' }); break;
@@ -945,7 +1025,7 @@ function onKey(ev) {
     if (UI.modal && ['bank', 'trade', 'yop', 'mono', 'rules', 'winner'].includes(UI.modal)) {
       if (UI.modal === 'trade' && G && myTrade() && humanActor() === G.current) send({ type: 'trade-cancel' });
       closeModal(); render();
-    } else if (UI.mode) { UI.mode = null; UI.moveFrom = null; UI.knightFrom = null; render(); }
+    } else if (UI.mode) { UI.mode = null; UI.moveFrom = null; UI.knightFrom = null; UI.bkFrom = null; render(); }
   }
   if (ev.key === ' ' && !typing && G && G.phase === 'roll' && humanActor() != null && !UI.modal) {
     ev.preventDefault();

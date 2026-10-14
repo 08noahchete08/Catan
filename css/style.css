@@ -522,3 +522,18 @@ button.icon { padding: 3px 9px; }
 .alch-row b { width: 90px; }
 button.alch { padding: 2px; background: transparent; border-color: transparent; }
 button.alch.sel { border-color: var(--accent); background: #3a3220; }
+
+/* Mercaderes y Bárbaros */
+.river { stroke: #1f7fc4; stroke-width: 12; stroke-linecap: round; opacity: .95; filter: url(#shadow); }
+.river-hi { stroke: #a7dcf7; stroke-width: 2.5; stroke-linecap: round; stroke-dasharray: 5 7; }
+.bridge-base { stroke: #6b4b2a; stroke-width: 14; stroke-linecap: butt; }
+.bridge-rail { stroke: #c8a06a; stroke-width: 2; }
+.net-line { stroke: #cfe9f7; stroke-width: 2; stroke-dasharray: 3 3; opacity: .8; }
+.fishground circle { fill: #1f5f8a; stroke: #cfe9f7; stroke-width: 2; filter: url(#shadow); }
+.fg-ic { font-size: 12px; text-anchor: middle; dominant-baseline: middle; }
+.fg-num { font-size: 11px; font-weight: 800; text-anchor: middle; fill: #fff; }
+.lake-num { font-size: 11px; }
+.camel { font-size: 17px; text-anchor: middle; dominant-baseline: middle; pointer-events: none; filter: drop-shadow(0 1px 1px rgba(0,0,0,.6)); }
+.conquered { fill: rgba(120, 20, 20, .38); stroke: #5a1010; stroke-width: 2; pointer-events: none; }
+.tb-hand { margin-top: 6px; color: var(--muted); }
+.gold-buy button { font-size: 16px; }

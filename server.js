@@ -153,7 +153,7 @@ setInterval(() => {
 }, 25000);
 
 // ============================ Motor del juego ============================
-const GAME_SCRIPTS = ['board', 'game', 'variants', 'seafarers', 'ck', 'ai'].map(f =>
+const GAME_SCRIPTS = ['board', 'game', 'variants', 'seafarers', 'ck', 'tb', 'ai'].map(f =>
   new vm.Script(fs.readFileSync(path.join(ROOT, 'js', f + '.js'), 'utf8'), { filename: f + '.js' }));
 
 function makeEngine() {
@@ -167,7 +167,7 @@ function makeEngine() {
 const BASE = makeEngine();
 const COLORS = BASE.call('PLAYER_COLORS.map(c => c.hex)');
 const RES = BASE.call('RES');
-const EXPANSIONS_READY = ['seafarers', 'ck']; // falta: 'tb'
+const EXPANSIONS_READY = ['seafarers', 'ck', 'tb'];
 const AI_NAMES = ['Bruno', 'Carla', 'Diego', 'Elena', 'Fede', 'Gala', 'Hugo', 'Irene'];
 
 // ============================ Salas ============================
@@ -251,6 +251,7 @@ function stateFor(room, seat) {
       p.res = Object.fromEntries(Object.keys(p.res).map(r => [r, 0]));
       p.dev = p.dev.map(d => ({ type: 'oculta', turn: d.turn }));
       if (p.progress) p.progress = p.progress.map(() => ({ type: 'oculta' }));
+      if (p.fishTokens) p.fishTokens = p.fishTokens.map(() => 0);
     }
   }
   return {
@@ -313,8 +314,8 @@ function scheduleAI(room) {
 function startGame(room) {
   const setup = room.seats.map(s => ({ name: s.name, color: s.color, isAI: s.isAI }));
   room.engine = makeEngine();
-  const { winPoints, mode5, cutRoads, variants, expansion } = room.options;
-  room.engine.call('newGame(__args[0], __args[1])', setup, { winPoints, mode5, cutRoads, variants, expansion });
+  const { winPoints, mode5, cutRoads, variants, expansion, tbScenario } = room.options;
+  room.engine.call('newGame(__args[0], __args[1])', setup, { winPoints, mode5, cutRoads, variants, expansion, tbScenario });
   room.started = true;
   room.seats.forEach((s, i) => { if (!s.isAI && !s.connected) markAway(room, i, true); });
   broadcastState(room);
@@ -475,6 +476,7 @@ function onMessage(ws, m) {
       room.options.cutRoads = m.cutRoads !== false;
       room.options.variants = BASE.call('cleanVariants(__args[0])', m.variants);
       room.options.expansion = EXPANSIONS_READY.includes(m.expansion) ? m.expansion : 'none';
+      room.options.tbScenario = ['pescadores', 'rios', 'caravanas', 'barbaros'].includes(m.tbScenario) ? m.tbScenario : 'pescadores';
       if ([300, 900, 1600].includes(Number(m.speed))) room.options.speed = Number(m.speed);
       break;
     case 'start':

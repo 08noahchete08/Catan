@@ -656,6 +656,9 @@ function resolvePending(pid, value) {
       updateLongestRoad();
       break;
     }
+    default:
+      if (typeof EXTRA_PICKS !== 'undefined' && EXTRA_PICKS[pd.card]) EXTRA_PICKS[pd.card](pid, v, pd);
+      break;
     case 'espia': {
       const cards = P(v).progress;
       const c = cards.splice(rand(cards.length), 1)[0];

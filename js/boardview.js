@@ -51,6 +51,7 @@ function computeView() {
     : G.hexes;
   shown.forEach(h => h.vertices.forEach(id => { const v = G.vertices[id]; const p = pr(v.x, v.y); xs.push(p[0]); ys.push(p[1]); }));
   G.ports.forEach(p => { const q = pr(p.x, p.y); xs.push(q[0]); ys.push(q[1]); });
+  (G.fishGrounds || []).forEach(p => { const q = pr(p.x, p.y); xs.push(q[0]); ys.push(q[1]); });
   const pad = 30;
   const minX = Math.min(...xs) - pad;
   const minY = Math.min(...ys) - pad - 30 - 40; // altura de las piezas + espacio para el cartel
@@ -131,6 +132,19 @@ const ART = {
     <path d="M1 0 L4 -5 H11 L13 0 Z" fill="#f2c230" stroke="#8a6200" stroke-width=".8"/>
     <path d="M-5 -5 L-2 -10 H6 L8 -5 Z" fill="#ffd84d" stroke="#8a6200" stroke-width=".8"/>
     <path d="M-1 -9 H4" stroke="#fff7c2" stroke-width="1"/>`),
+  fish: (x, y, s, flip) => g(x, y, s, `
+    <path d="M-8 0 Q0 -7 8 0 Q0 7 -8 0 Z" fill="#f2a65a" stroke="#8a4b16" stroke-width=".8"/>
+    <path d="M8 0 L13 -4 V4 Z" fill="#f2a65a" stroke="#8a4b16" stroke-width=".8"/><circle cx="-4" cy="-1" r="1" fill="#222"/>`, flip),
+  palm: (x, y, s, flip) => g(x, y, s, `
+    <ellipse cy="1" rx="8" ry="2.4" fill="${SHADOW}"/>
+    <path d="M0 0 Q2 -10 0 -20" stroke="#7a5230" stroke-width="2.4" fill="none"/>
+    <path d="M0 -20 Q-9 -24 -13 -16 M0 -20 Q9 -25 13 -16 M0 -20 Q-4 -28 -10 -27 M0 -20 Q5 -29 10 -27" stroke="#2f8a3f" stroke-width="3" fill="none" stroke-linecap="round"/>`, flip),
+  castle: (x, y, s) => g(x, y, s, `
+    <ellipse cy="2" rx="22" ry="5" fill="${SHADOW}"/>
+    <path d="M-18 0 V-16 H-13 V-20 H-9 V-16 H-4 V-20 H4 V-16 H9 V-20 H13 V-16 H18 V0 Z" fill="#c7c9cf" stroke="#3a3a40" stroke-width="1"/>
+    <path d="M-6 -16 V-30 H-2 V-26 H2 V-30 H6 V-16 Z" fill="#b3b6bd" stroke="#3a3a40" stroke-width="1"/>
+    <path d="M-4 0 V-7 A4 4 0 0 1 4 -7 V0 Z" fill="#4b3a2a"/>
+    <path d="M0 -30 V-38 L7 -35 L0 -33" fill="#e03b3b" stroke="#3a3a40" stroke-width=".6"/>`),
   dune: (x, y, s, flip) => g(x, y, s, `
     <path d="M-19 0 Q-7 -10 4 -4 Q12 -9 19 0 Z" fill="#dcc48c"/>
     <path d="M4 -4 Q12 -9 19 0 L9 0 Q8 -3 4 -4 Z" fill="#c8ad6f"/>
@@ -149,6 +163,9 @@ const LAYOUT = {
           ['sheaf', -33, 23, .9], ['sheaf', 33, 25, .9], ['sheaf', 0, 44, .75]],
   oro: [['river', -4, -14, 1], ['goldpile', -24, -20, 1], ['goldpile', 24, -24, .9], ['ingots', -30, 22, 1], ['ingots', 30, 24, .9], ['goldpile', 0, 44, .7]],
   mar: [],
+  lago: [['fish', -18, -22, 1], ['fish', 20, -26, .9], ['fish', -26, 24, .9], ['fish', 24, 26, 1]],
+  oasis: [['palm', -24, -18, 1], ['palm', 24, -22, 1.1], ['palm', -28, 22, .9], ['palm', 26, 24, 1], ['dune', 0, 40, .7]],
+  castillo: [['castle', 0, -6, 1.3]],
   desierto: [['dune', -20, -22, 1], ['dune', 22, 26, 1.1], ['cactus', 22, -22, 1], ['cactus', -25, 24, .9], ['dune', -30, 6, .7]],
 };
 
@@ -295,6 +312,9 @@ function renderBoard() {
     <pattern id="tex-campo" width="9" height="9" patternUnits="userSpaceOnUse" patternTransform="rotate(-25)"><rect width="9" height="3.5" fill="#f3d26a"/></pattern>
     <pattern id="tex-montana" width="12" height="12" patternUnits="userSpaceOnUse"><circle cx="3" cy="4" r="1.5" fill="#5d636b"/><circle cx="9" cy="9" r="1" fill="#babfc6"/></pattern>
     <pattern id="tex-oro" width="14" height="14" patternUnits="userSpaceOnUse"><path d="M3 3 l1 2 l2 1 l-2 1 l-1 2 l-1 -2 l-2 -1 l2 -1 Z" fill="#fff3b0"/><circle cx="10" cy="10" r="1" fill="#fff3b0"/></pattern>
+    <pattern id="tex-lago" width="20" height="10" patternUnits="userSpaceOnUse"><path d="M0 5 Q5 2 10 5 T20 5" stroke="#9fd3f2" stroke-width="1" fill="none"/></pattern>
+    <pattern id="tex-oasis" width="22" height="10" patternUnits="userSpaceOnUse"><path d="M0 6 Q5.5 2 11 6 T22 6" stroke="#c9ad6a" stroke-width="1.1" fill="none"/></pattern>
+    <pattern id="tex-castillo" width="12" height="8" patternUnits="userSpaceOnUse"><path d="M0 0 H12 M0 4 H12 M6 0 V4 M0 4 V8" stroke="#80858d" stroke-width=".8"/></pattern>
     <pattern id="tex-mar" width="20" height="10" patternUnits="userSpaceOnUse"><path d="M0 5 Q5 2 10 5 T20 5" stroke="#9fd3f2" stroke-width="1" fill="none"/></pattern>
     <pattern id="tex-desierto" width="22" height="10" patternUnits="userSpaceOnUse"><path d="M0 6 Q5.5 2 11 6 T22 6" stroke="#cdb37a" stroke-width="1.1" fill="none"/></pattern>`;
   for (const [id, t] of Object.entries(TERRAIN)) {
@@ -353,6 +373,27 @@ function renderBoard() {
     }
   }
 
+  // --- Ríos y caladeros (Mercaderes y Bárbaros) ---
+  if (G.tb === 'rios') {
+    for (const e of G.edges) {
+      if (!e.river) continue;
+      const [a1, b1] = e.v.map(id => G.vertices[id]);
+      const p1 = pr(a1.x, a1.y), p2 = pr(b1.x, b1.y);
+      out.push(`<line x1="${f1(p1[0])}" y1="${f1(p1[1])}" x2="${f1(p2[0])}" y2="${f1(p2[1])}" class="river"/>
+        <line x1="${f1(p1[0])}" y1="${f1(p1[1])}" x2="${f1(p2[0])}" y2="${f1(p2[1])}" class="river-hi"/>`);
+    }
+  }
+  if (G.tb === 'pescadores') {
+    for (const fg of G.fishGrounds) {
+      const [px, py] = pr(fg.x, fg.y);
+      for (const vid of G.edges[fg.edge].v) {
+        const [vx, vy] = pr(G.vertices[vid].x, G.vertices[vid].y);
+        out.push(`<line x1="${f1(vx)}" y1="${f1(vy)}" x2="${f1(px)}" y2="${f1(py)}" class="net-line"/>`);
+      }
+      out.push(`<g class="fishground" transform="translate(${f1(px)},${f1(py)})"><circle r="16"/><text y="-2" class="fg-ic">🐟</text><text y="11" class="fg-num">${fg.number}</text><title>Caladero: pesca con ${fg.number}</title></g>`);
+    }
+  }
+
   // --- Ilustraciones (de atrás hacia delante) ---
   const deco = [];
   for (const h of G.hexes) {
@@ -379,6 +420,18 @@ function renderBoard() {
       <title>${hexName(h)}</title></g>`);
   }
 
+  if (G.tb === 'pescadores' && G.lake != null) {
+    const lh = G.hexes[G.lake];
+    const [x, y] = pr(lh.x, lh.y + 4);
+    out.push(`<g class="token-g"><ellipse cx="${f1(x)}" cy="${f1(y)}" rx="24" ry="${f1(14 * K + 4)}" fill="url(#tokenGrad)" class="token"/>
+      <text x="${f1(x)}" y="${f1(y + 4)}" class="num lake-num">2·3·11·12</text><title>Lago: pesca con 2, 3, 11 y 12</title></g>`);
+  }
+  if (G.tb === 'barbaros') {
+    for (const h of G.hexes) {
+      if (h.conquered) out.push(`<polygon points="${polyStr(hexCorners(h.x, h.y, HEX_R - 5))}" class="conquered"/>`);
+    }
+  }
+
   // --- Caminos ---
   for (const e of G.edges) {
     if (e.road === null) continue;
@@ -387,6 +440,7 @@ function renderBoard() {
     const p2 = pr(b1.x + (a1.x - b1.x) * .16, b1.y + (a1.y - b1.y) * .16);
     const c = P(e.road).color;
     const line = (dy, cls, extra) => `<line x1="${f1(p1[0])}" y1="${f1(p1[1] + dy)}" x2="${f1(p2[0])}" y2="${f1(p2[1] + dy)}" class="${cls}" ${extra}/>`;
+    if (e.bridge) out.push(line(5, 'bridge-base', '') + line(-3, 'bridge-rail', ''));
     out.push(line(3.5, 'road-shadow', '') + line(2, 'road-side', `stroke="${shade(c, -.45)}"`) +
       line(0, 'road', `stroke="${c}"`) + line(-1.2, 'road-hi', `stroke="${shade(c, .35)}"`));
   }
@@ -425,6 +479,29 @@ function renderBoard() {
     const name = v.building.metro ? `metrópolis de ${TRACKS[v.building.metro].name.toLowerCase()}` : v.building.type + (v.building.wall ? ' con muralla' : '');
     pieces.push({ y, svg: wall + (v.building.type === 'ciudad' ? citySvg(x, y, c, v.building.metro) : settlementSvg(x, y, c)) + `<title>${esc(P(v.building.owner).name)}: ${name}</title>` });
   }
+  if (G.tb === 'caravanas') {
+    for (const e of G.edges) {
+      if (!e.camel) continue;
+      const [a1, b1] = e.v.map(id => G.vertices[id]);
+      const [x, y] = pr((a1.x + b1.x) / 2, (a1.y + b1.y) / 2);
+      pieces.push({ y, svg: `<text x="${f1(x)}" y="${f1(y + 2)}" class="camel">🐪</text>` });
+    }
+  }
+  if (G.tb === 'barbaros') {
+    for (const h of G.hexes) {
+      for (let i = 0; i < (h.barbs || 0); i++) {
+        const [x, y] = pr(h.x - 16 + i * 16, h.y + 30);
+        pieces.push({ y, svg: `<g transform="translate(${f1(x)},${f1(y)})" class="robber"><ellipse cy="2" rx="7" ry="2.5" fill="rgba(0,0,0,.4)"/>
+          <path d="M-6 2 C-6 -6 -3 -8 0 -8 C3 -8 6 -6 6 2 Z" fill="#5a2a1a" stroke="#111"/><circle cy="-11" r="4" fill="#5a2a1a" stroke="#111"/>
+          <path d="M-5 -14 L-7 -18 M5 -14 L7 -18" stroke="#ddd" stroke-width="1.5"/><title>Bárbaro</title></g>` });
+      }
+    }
+    for (const k of G.bknights) {
+      const [a1, b1] = G.edges[k.edge].v.map(id => G.vertices[id]);
+      const [x, y] = pr((a1.x + b1.x) / 2, (a1.y + b1.y) / 2);
+      pieces.push({ y, svg: knightSvg(x, y, P(k.owner).color, 1, true) + `<title>Caballero de ${esc(P(k.owner).name)} (${k.mp} pasos)</title>` });
+    }
+  }
   if (G.ck && G.merchant) {
     const mh = G.hexes[G.merchant.hex];
     const [x, y] = pr(mh.x + 30, mh.y + 6);
@@ -459,6 +536,25 @@ function renderBoard() {
     const [a1, b1] = G.edges[UI.moveFrom].v.map(id => G.vertices[id]);
     const [x, y] = pr((a1.x + b1.x) / 2, (a1.y + b1.y) / 2);
     out.push(`<circle cx="${f1(x)}" cy="${f1(y - 5)}" r="16" class="ship-selected"/>`);
+  }
+  if (a != null && !pick && G.tb && G.phase === 'main' && a === G.current) {
+    if (UI.mode === 'puente') {
+      for (const eid of bridgeSpots(a)) {
+        const [a1, b1] = G.edges[eid].v.map(id => G.vertices[id]);
+        const p1 = pr(a1.x, a1.y), p2 = pr(b1.x, b1.y);
+        out.push(`<line x1="${f1(p1[0])}" y1="${f1(p1[1])}" x2="${f1(p2[0])}" y2="${f1(p2[1])}" class="edge-target" data-b="${eid}"/>`);
+      }
+    }
+    if (UI.mode === 'bk' || UI.mode === 'bk-boost') {
+      const list = UI.mode === 'bk-boost' ? G.bknights.filter(k => k.owner === a && !k.boosted).map(k => k.edge)
+        : UI.bkFrom == null ? G.bknights.filter(k => k.owner === a && bkMoveTargets(a, k.edge).length).map(k => k.edge)
+        : bkMoveTargets(a, UI.bkFrom);
+      for (const eid of list) {
+        const [a1, b1] = G.edges[eid].v.map(id => G.vertices[id]);
+        const [x, y] = pr((a1.x + b1.x) / 2, (a1.y + b1.y) / 2);
+        out.push(`<circle cx="${f1(x)}" cy="${f1(y - 4)}" r="11" class="v-target knight-target" data-bk="${eid}"/>`);
+      }
+    }
   }
   for (const vid of kT) {
     const [x, y] = pr(G.vertices[vid].x, G.vertices[vid].y);

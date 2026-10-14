@@ -28,6 +28,9 @@ const TERRAIN = {
   montana:  { name: 'Montaña',  res: 'mineral', color: '#8d939c', dark: '#676c74', icon: '⛰️' },
   desierto: { name: 'Desierto', res: null,      color: '#e5d3a1', dark: '#c9b27a', icon: '🌵' },
   oro:      { name: 'Río de oro', res: null,    color: '#9c7a1c', dark: '#6b520f', icon: '💰', gold: true },
+  lago:     { name: 'Lago',     res: null,      color: '#3d8fc4', dark: '#2a6a96', icon: '🐟', lake: true },
+  oasis:    { name: 'Oasis',    res: null,      color: '#e2c787', dark: '#b89a55', icon: '🌴' },
+  castillo: { name: 'Castillo', res: null,      color: '#9aa0a8', dark: '#6d737b', icon: '🏰' },
   mar:      { name: 'Mar',      res: null,      color: '#2f7fb5', dark: '#22628f', icon: '🌊', sea: true },
 };
 
