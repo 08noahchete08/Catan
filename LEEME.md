@@ -15,7 +15,8 @@ Al crear la partida (local u online) se puede elegir:
 - **Variantes** (combinables): ladrón amistoso, cartas de eventos y maestro del puerto.
 - **Expansiones** (una a la vez):
   - **Navegantes de Catán:** mapa con isla principal e islas nuevas generado al azar, barcos (madera + lana), mover un barco por turno, ríos de oro, pirata y +2 puntos por colonizar cada isla nueva. Recomendado: 12-14 puntos.
-  - Ciudades y Caballeros, Mercaderes y Bárbaros: en preparación.
+  - **Ciudades y Caballeros:** mercancías (papel, tela, moneda), dado de eventos, ataques de los bárbaros, caballeros (construir, ascender, activar, mover, desplazar y expulsar al ladrón), mejoras de ciudad con sus habilidades, metrópolis, murallas y las 54 cartas de progreso. Recomendado: 13 puntos.
+  - Mercaderes y Bárbaros: en preparación.
 
 ## Jugar en local
 

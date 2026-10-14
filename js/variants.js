@@ -73,7 +73,7 @@ function randomBankRes() {
 
 function randomHandRes(pid) {
   const pool = [];
-  RES.forEach(r => { for (let i = 0; i < P(pid).res[r]; i++) pool.push(r); });
+  CARDS.forEach(r => { for (let i = 0; i < P(pid).res[r]; i++) pool.push(r); });
   return pool.length ? pool[rand(pool.length)] : null;
 }
 

@@ -153,7 +153,7 @@ setInterval(() => {
 }, 25000);
 
 // ============================ Motor del juego ============================
-const GAME_SCRIPTS = ['board', 'game', 'variants', 'seafarers', 'ai'].map(f =>
+const GAME_SCRIPTS = ['board', 'game', 'variants', 'seafarers', 'ck', 'ai'].map(f =>
   new vm.Script(fs.readFileSync(path.join(ROOT, 'js', f + '.js'), 'utf8'), { filename: f + '.js' }));
 
 function makeEngine() {
@@ -167,7 +167,7 @@ function makeEngine() {
 const BASE = makeEngine();
 const COLORS = BASE.call('PLAYER_COLORS.map(c => c.hex)');
 const RES = BASE.call('RES');
-const EXPANSIONS_READY = ['seafarers']; // se irán añadiendo: 'ck', 'tb'
+const EXPANSIONS_READY = ['seafarers', 'ck']; // falta: 'tb'
 const AI_NAMES = ['Bruno', 'Carla', 'Diego', 'Elena', 'Fede', 'Gala', 'Hugo', 'Irene'];
 
 // ============================ Salas ============================
@@ -241,14 +241,16 @@ function stateFor(room, seat) {
   const G = getG(room);
   const s = JSON.parse(JSON.stringify(G));
   s.devDeck = new Array(G.devDeck.length).fill(0);
+  if (s.progressDecks) for (const k of Object.keys(s.progressDecks)) s.progressDecks[k] = new Array(s.progressDecks[k].length).fill(0);
   s.log = s.log.slice(-150);
   delete s.lastSteal;
   const reveal = G.phase === 'gameover';
   for (const p of s.players) {
-    p.handCount = RES.reduce((n, r) => n + p.res[r], 0);
+    p.handCount = Object.values(p.res).reduce((n, x) => n + x, 0);
     if (!reveal && p.id !== seat) {
-      p.res = Object.fromEntries(RES.map(r => [r, 0]));
+      p.res = Object.fromEntries(Object.keys(p.res).map(r => [r, 0]));
       p.dev = p.dev.map(d => ({ type: 'oculta', turn: d.turn }));
+      if (p.progress) p.progress = p.progress.map(() => ({ type: 'oculta' }));
     }
   }
   return {

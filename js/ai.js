@@ -204,9 +204,9 @@ const AI = {
     const sel = zeroRes();
     for (let i = 0; i < need; i++) {
       let best = null, bv = -Infinity;
-      for (const r of RES) {
+      for (const r of handTypes()) {
         if (tmp[r] <= 0) continue;
-        const v = tmp[r] - (cost[r] || 0) * 1.5 + Math.random() * 0.1;
+        const v = tmp[r] - (cost[r] || 0) * 1.5 - (COM.includes(r) ? 1 : 0) + Math.random() * 0.1;
         if (v > bv) { bv = v; best = r; }
       }
       tmp[best]--; sel[best]++;
@@ -269,10 +269,12 @@ const AI = {
     const p = P(pid), cost = AI.costOf(g);
     const need = RES.filter(r => (cost[r] || 0) > p.res[r] && G.bank[r] > 0);
     if (!need.length) return false;
-    const order = RES.slice().sort((a, b) => (p.res[b] - (cost[b] || 0)) - (p.res[a] - (cost[a] || 0)));
+    const order = handTypes().slice().sort((a, b) => (p.res[b] - (cost[b] || 0)) - (p.res[a] - (cost[a] || 0)));
     for (const r of order) {
       if (need.includes(r)) continue;
-      if (p.res[r] - (cost[r] || 0) >= bankRate(pid, r)) {
+      // En Ciudades y Caballeros se guardan mercancías para las mejoras
+      const keep = (cost[r] || 0) + (G.ck && COM.includes(r) ? Math.min(5, P(pid).improve[Object.keys(TRACKS).find(t => TRACKS[t].com === r)] + 1) : 0);
+      if (p.res[r] - keep >= bankRate(pid, r)) {
         G.aiTrades++;
         return bankTrade(pid, r, need[0]);
       }
@@ -324,13 +326,14 @@ const AI = {
   },
 
   mainStep(pid) {
+    if (G.ck && AI.ckStep(pid)) return true;
     if (AI.tryDev(pid)) return true;
     if (AI.buildBest(pid, true)) return true;
     const g = AI.goal(pid);
     if (AI.tryBankTrade(pid, g)) return true;
     if (AI.tryPlayerTrade(pid, g)) return true;
     // Gastar cartas si hay riesgo de descarte por un 7
-    if (total(P(pid).res) > 7) {
+    if (total(P(pid).res) > handLimit(pid)) {
       if (canAfford(pid, COSTS.carta) && G.devDeck.length) return buyDev(pid);
       if (AI.buildToward(pid, AI.roadTarget(pid))) return true;
     }
@@ -340,6 +343,132 @@ const AI = {
   specialStep(pid) {
     if (AI.buildBest(pid, true)) return true;
     return endSpecial(pid);
+  },
+
+  // ---------- Ciudades y Caballeros ----------
+  ckStep(pid) {
+    const p = P(pid);
+    for (const c of p.progress.slice()) {
+      if (AI.progressUseful(pid, c.type) && playProgress(pid, c.type)) return true;
+    }
+    // Expulsar al ladrón de mis terrenos
+    const rob = G.hexes[G.robber];
+    if (G.robberActive && rob.vertices.some(v => G.vertices[v].building && G.vertices[v].building.owner === pid)) {
+      const ch = chaseRobberSpots(pid);
+      if (ch.length && chaseRobber(pid, ch[0])) return true;
+    }
+    // Mejoras de ciudad
+    const tracks = ['science', 'politics', 'trade'].sort((a, b) => p.res[TRACKS[b].com] - p.res[TRACKS[a].com]);
+    for (const t of tracks) if (canImprove(pid, t) && improveCity(pid, t)) return true;
+    // Defensa contra los bárbaros
+    const cities = citiesOf(pid).length;
+    const danger = G.barbPos >= BARB_TRACK - 3;
+    if (danger || G.barbPos >= BARB_TRACK - 1) {
+      for (const vid of knightsOf(pid)) {
+        if (!G.vertices[vid].knight.active && canAfford(pid, CK_COSTS.activar) && activateKnight(pid, vid)) return true;
+      }
+    }
+    if (knightsOf(pid).length < cities + 1 && canAfford(pid, CK_COSTS.caballero)) {
+      const spots = knightSpots(pid).sort((a, b) => AI.knightSpotValue(pid, b) - AI.knightSpotValue(pid, a));
+      if (spots.length && buildKnight(pid, spots[0])) return true;
+    }
+    if (danger && canAfford(pid, CK_COSTS.ascender)) {
+      const k = knightsOf(pid).find(v => canPromote(pid, v));
+      if (k !== undefined && promoteKnight(pid, k)) return true;
+    }
+    // Murallas si la mano es grande
+    if (total(p.res) > handLimit(pid) - 2 && canAfford(pid, CK_COSTS.muralla)) {
+      const w = wallSpots(pid);
+      if (w.length && buildWall(pid, w[0])) return true;
+    }
+    return false;
+  },
+
+  // Caballeros cerca de mis edificios y del ladrón
+  knightSpotValue(pid, vid) {
+    const v = G.vertices[vid];
+    let s = Math.random() * 0.1;
+    if (v.hexes.includes(G.robber)) s += 2;
+    for (const a of v.adj) { const b = G.vertices[a].building; if (b && b.owner === pid) s += 1; }
+    return s;
+  },
+
+  progressUseful(pid, type) {
+    const p = P(pid), me = vp(pid, false);
+    switch (type) {
+      case 'alquimista': return false;
+      case 'irrigacion': return adjacentHexesOf(pid, 'campo').length > 0;
+      case 'mineria': return adjacentHexesOf(pid, 'montana').length > 0;
+      case 'grua': return Object.keys(TRACKS).some(t => p.improve[t] < 5 && p.res[TRACKS[t].com] >= p.improve[t] && citiesOf(pid).length);
+      case 'medicina': return canAfford(pid, { mineral: 2, trigo: 1 }) && citySpots(pid).length > 0 && p.cities > 0;
+      case 'ingeniero': return wallSpots(pid).length > 0;
+      case 'carreterasP': return freeBuildLeft(pid) && !!AI.roadTarget(pid);
+      case 'herrero': return knightsOf(pid).some(v => canPromote(pid, v));
+      case 'puertoComercial': return opponents(pid).some(o => COM.some(c => P(o).res[c] > 0)) && RES.some(r => p.res[r] > 0);
+      case 'mercaderMaestro': return opponents(pid).some(o => vp(o, false) > me && total(P(o).res) > 0);
+      case 'mercader': return merchantHexes(pid).length > 0 && !(G.merchant && G.merchant.owner === pid);
+      case 'flota': return CARDS.some(c => p.res[c] >= 3);
+      case 'monopolioRecursos': case 'monopolioComercio': return true;
+      case 'obispo': return G.robberActive;
+      case 'desertor': return knightSpots(pid).length > 0 && opponents(pid).some(o => knightsOf(o).length);
+      case 'diplomatico': return openRoads().some(e => G.edges[e].road !== pid && G.edges[e].road === G.longestHolder);
+      case 'intriga': return G.vertices.some(v => v.knight && v.knight.owner !== pid && v.edges.some(e => G.edges[e].road === pid));
+      case 'saboteador': return opponents(pid).some(o => vp(o, false) >= me && total(P(o).res) >= 4);
+      case 'espia': return opponents(pid).some(o => P(o).progress.length);
+      case 'caudillo': return G.barbPos >= BARB_TRACK - 3 && knightsOf(pid).some(v => !G.vertices[v].knight.active);
+      case 'boda': return opponents(pid).some(o => vp(o, false) > me && total(P(o).res) > 0);
+    }
+    return false;
+  },
+
+  // Producción propia si sale la suma «s»
+  gainFor(pid, s) {
+    let g = 0;
+    for (const h of G.hexes) {
+      if (h.number !== s || h.id === G.robber) continue;
+      for (const vid of h.vertices) {
+        const b = G.vertices[vid].building;
+        if (b && b.owner === pid) g += b.type === 'ciudad' ? 2 : 1;
+      }
+    }
+    return g;
+  },
+
+  pick(pid) {
+    const pd = G.pending;
+    if (pd.kind === 'dice') {
+      let best = 8, bv = -1;
+      for (let s = 2; s <= 12; s++) {
+        if (s === 7) continue;
+        const v = AI.gainFor(pid, s) + Math.random() * 0.1;
+        if (v > bv) { bv = v; best = s; }
+      }
+      const red = Math.max(1, best - 6);
+      return resolvePending(pid, { red, yellow: best - red });
+    }
+    const o = pd.options.slice();
+    const byVp = (a, b) => vp(b, false) - vp(a, false);
+    const mineAdj = h => G.hexes[h].vertices.some(v => G.vertices[v].building && G.vertices[v].building.owner === pid);
+    const othersHave = r => opponents(pid).reduce((s, q) => s + P(q).res[r], 0);
+    let choice = o[0];
+    switch (pd.card) {
+      case 'inventor':
+        choice = pd.step === 1
+          ? (o.filter(mineAdj).sort((a, b) => pips(G.hexes[a].number) - pips(G.hexes[b].number))[0] ?? o[0])
+          : (o.filter(h => !mineAdj(h)).sort((a, b) => pips(G.hexes[b].number) - pips(G.hexes[a].number))[0] ?? o[0]);
+        break;
+      case 'mercaderMaestro': case 'espia': case 'desertor':
+        if (pd.kind === 'player') choice = o.sort(byVp)[0];
+        else choice = o.sort((a, b) => AI.knightSpotValue(pid, b) - AI.knightSpotValue(pid, a))[0];
+        break;
+      case 'flota': choice = o.sort((a, b) => P(pid).res[b] - P(pid).res[a])[0]; break;
+      case 'monopolioRecursos': case 'monopolioComercio': choice = o.sort((a, b) => othersHave(b) - othersHave(a))[0]; break;
+      case 'mercader': choice = o.sort((a, b) => pips(G.hexes[b].number) - pips(G.hexes[a].number))[0]; break;
+      case 'diplomatico':
+        if (pd.step === 1) choice = o.find(e => G.edges[e].road !== pid && G.edges[e].road === G.longestHolder) ?? o.find(e => G.edges[e].road !== pid) ?? o[0];
+        break;
+    }
+    return resolvePending(pid, choice);
   },
 
   // Acción del jugador en pareja: construir, comerciar con el banco y una carta
@@ -353,6 +482,11 @@ const AI = {
   act() {
     const pid = actor();
     let ok = false;
+    if (G.pending) {
+      ok = AI.pick(pid);
+      if (!ok && !skipPending(pid)) G.pending = null;
+      return;
+    }
     switch (G.phase) {
       case 'setup-settlement': {
         const prod = AI.production(pid);
@@ -367,7 +501,8 @@ const AI = {
       }
       case 'gold': ok = AI.chooseGold(pid); break;
       case 'roll':
-        ok = (AI.robberOnMe(pid) && playKnight(pid)) || rollDice();
+        ok = (G.ck && progressPlayable(pid, 'alquimista') && playProgress(pid, 'alquimista')) ||
+          (AI.robberOnMe(pid) && playKnight(pid)) || rollDice();
         break;
       case 'discard': ok = AI.discard(pid); break;
       case 'robber': ok = moveRobber(AI.chooseRobberHex(pid)); break;

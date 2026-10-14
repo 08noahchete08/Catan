@@ -104,7 +104,7 @@ function toggleHtml(id, icon, title, desc, on, disabled, extra = '') {
 // Expansiones grandes (excluyentes entre sí)
 const EXPANSIONS = {
   seafarers: { name: 'Navegantes de Catán', icon: '⛵', desc: 'Barcos, islas nuevas (+2 puntos), ríos de oro y el pirata. Recomendado: 12-14 puntos.', ready: true },
-  ck: { name: 'Ciudades y Caballeros', icon: '🏰', desc: 'Mercancías, caballeros, bárbaros y mejoras de ciudad.', ready: false },
+  ck: { name: 'Ciudades y Caballeros', icon: '🏰', desc: 'Mercancías, caballeros, bárbaros, mejoras de ciudad, metrópolis y cartas de progreso. Recomendado: 13 puntos.', ready: true },
   tb: { name: 'Mercaderes y Bárbaros', icon: '🐪', desc: 'Pescadores, ríos, caravanas y ataque bárbaro.', ready: false },
 };
 
@@ -273,8 +273,18 @@ function render() {
 // El dibujo del tablero está en boardview.js
 
 function onBoardClick(ev) {
-  const t = ev.target.closest('[data-v],[data-e],[data-h],[data-s],[data-ms]');
+  const t = ev.target.closest('[data-v],[data-e],[data-h],[data-s],[data-ms],[data-kv],[data-pick]');
   if (!t || !G || humanActor() == null) return;
+  if (t.dataset.pick != null) { send({ type: 'pick', value: +t.dataset.pick }); return; }
+  if (t.dataset.kv != null) {
+    const v = +t.dataset.kv;
+    const kinds = { caballero: 'ck-knight', ascender: 'ck-promote', activar: 'ck-activate', expulsar: 'ck-chase', muralla: 'ck-wall' };
+    if (UI.mode === 'mover-cab') {
+      if (UI.knightFrom == null) { UI.knightFrom = v; render(); }
+      else { send({ type: 'ck-move', from: UI.knightFrom, to: v }); UI.knightFrom = null; }
+    } else if (kinds[UI.mode]) send({ type: kinds[UI.mode], v });
+    return;
+  }
   if (t.dataset.v != null) {
     const v = +t.dataset.v;
     if (G.phase === 'setup-settlement' || UI.mode === 'poblado') send({ type: 'settle', v });
@@ -291,6 +301,15 @@ function onBoardClick(ev) {
     send({ type: 'robber', h: +t.dataset.h });
   }
 }
+
+const CK_MODE_TEXT = {
+  caballero: () => 'elige dónde colocar el caballero',
+  ascender: () => 'elige el caballero que asciendes',
+  activar: () => 'elige el caballero que activas',
+  'mover-cab': () => UI.knightFrom == null ? 'elige el caballero activo que mueves' : 'elige adónde va (puedes desplazar a uno más débil)',
+  expulsar: () => 'elige el caballero que expulsa al ladrón',
+  muralla: () => 'elige la ciudad para la muralla',
+};
 
 function renderBanner() {
   const a = actor();
@@ -311,10 +330,12 @@ function renderBanner() {
       case 'steal': txt = `${who}: elige a quién robar`; break;
       case 'road-building': txt = `${who}: coloca ${G.freeRoads} camino(s) gratis`; break;
       case 'main':
-        if (G.trade) txt = `🤝 ${who} propone un intercambio`;
+        if (G.pending) txt = `${pname(G.pending.pid)}: ${esc(G.pending.prompt)}`;
+        else if (G.trade) txt = `🤝 ${who} propone un intercambio`;
         else txt = UI.mode && mine
           ? (UI.mode === 'mover'
             ? `${who}: ${UI.moveFrom == null ? 'elige el barco que quieres mover' : 'elige dónde llevarlo'} (Esc para cancelar)`
+            : CK_MODE_TEXT[UI.mode] ? `${who}: ${CK_MODE_TEXT[UI.mode]()} (Esc para cancelar)`
             : `${who}: elige dónde construir ${{ camino: 'el camino', poblado: 'el poblado', ciudad: 'la ciudad', barco: 'el barco' }[UI.mode]} (Esc para cancelar)`)
           : `${who}: construye, comercia o termina el turno`;
         break;
@@ -354,6 +375,9 @@ function renderPlayers() {
           ${G.longestHolder === p.id ? '<span class="award" title="Gran Ruta Comercial (+2)">🛣️ Ruta</span>' : ''}
           ${G.armyHolder === p.id ? '<span class="award" title="Gran Ejército de Caballería (+2)">🛡️ Ejército</span>' : ''}
           ${G.harborHolder === p.id ? '<span class="award" title="Maestro del puerto (+2)">⚓ Puerto</span>' : ''}
+          ${G.ck ? `<span title="Fuerza de caballeros activos / total">🛡️ ${knightStrength(p.id)}/${knightStrength(p.id, false)}</span>
+            <span title="Mejoras: comercio, política, ciencia">${Object.entries(TRACKS).map(([k, t]) => `${t.gate}${p.improve[k]}`).join(' ')}</span>
+            <span title="Cartas de progreso">📘 ${p.progress.length}</span>` : ''}
           ${(p.islands || []).length ? `<span class="award" title="Islas nuevas colonizadas (+2 cada una)">🏝️ ${p.islands.length}</span>` : ''}
         </div>
       </div>
@@ -371,9 +395,11 @@ function renderTurnPanel() {
   const dice = G.dice
     ? `<div class="dice ${G.dice[0] + G.dice[1] === 7 ? 'seven' : ''}">${dieHtml(G.dice[0], roll)}${dieHtml(G.dice[1], roll + ' second')}<b>${G.dice[0] + G.dice[1]}</b></div>`
     : `<div class="dice empty">${dieHtml(0, '')}${dieHtml(0, '')}<b>–</b></div>`;
-  let html = `<div class="turn-head"><div><div class="turn-num">${G.turn ? 'Turno ' + G.turn : 'Colocación inicial'}</div>
+  const evDie = G.ck && G.dice && G.eventDie
+    ? `<span class="event-die ${G.eventDie}" title="${G.eventDie === 'barco' ? 'Barco bárbaro' : 'Puerta de ' + TRACKS[G.eventDie].name.toLowerCase()}">${G.eventDie === 'barco' ? '⛵' : TRACKS[G.eventDie].gate}</span>` : '';
+  let html = (G.ck ? barbarianHtml() : '') + `<div class="turn-head"><div><div class="turn-num">${G.turn ? 'Turno ' + G.turn : 'Colocación inicial'}</div>
     <div class="turn-who">${G.phase === 'gameover' ? 'Partida terminada' : 'Juega ' + pname(G.current)}
-      ${G.pairedActive ? `<div class="small muted">🤝 Acción de ${pname(G.partner)}</div>` : ''}</div></div>${dice}</div>`;
+      ${G.pairedActive ? `<div class="small muted">🤝 Acción de ${pname(G.partner)}</div>` : ''}</div></div><div class="dice-wrap">${dice}${evDie}</div></div>`;
 
   if (G.lastEvent && EVENT_INFO[G.lastEvent]) {
     const ev = EVENT_INFO[G.lastEvent];
@@ -389,6 +415,7 @@ function renderTurnPanel() {
       case 'setup-road': html += `<div class="info">Haz clic en un borde brillante para colocar tu camino${G.seafarers ? ' (o en uno azul para un barco)' : ''}.</div>`; break;
       case 'gold': html += `<button class="primary wide" data-act="reopen">💰 Elegir recursos del oro</button>`; break;
       case 'roll':
+        if (G.pending) { html += pendingPanelHtml(); break; }
         html += `<button class="primary wide big" data-act="roll">🎲 Tirar dados</button>`;
         if (playableDev(a, 'caballero')) html += `<div class="hint">Puedes jugar un Caballero antes de tirar.</div>`;
         break;
@@ -400,7 +427,9 @@ function renderTurnPanel() {
           <button class="wide" data-act="end-roads">Terminar</button>`;
         break;
       case 'main':
+        if (G.pending) { html += pendingPanelHtml(); break; }
         html += buildButtons(a);
+        if (G.ck) html += ckButtons(a);
         html += `<div class="btn-grid two">
           <button data-act="open-bank">🏦 Banco / puertos</button>
           <button data-act="open-trade">🤝 Comerciar${G.trade ? ' •' : ''}</button></div>
@@ -419,8 +448,100 @@ function renderTurnPanel() {
         break;
     }
   }
-  html += `<div class="bank-row" title="Cartas en el banco">🏦 ${RES.map(r => `<span>${RES_INFO[r].icon}${G.bank[r]}</span>`).join('')}<span>📜${G.devDeck.length}</span></div>`;
+  html += `<div class="bank-row" title="Cartas en el banco">🏦 ${handTypes().map(r => `<span>${RES_INFO[r].icon}${G.bank[r]}</span>`).join('')}${G.ck ? `<span title="Cartas de progreso">📘${Object.values(G.progressDecks).reduce((s, d) => s + d.length, 0)}</span>` : `<span>📜${G.devDeck.length}</span>`}</div>`;
   $('#turn-panel').innerHTML = html;
+}
+
+// ---------- Ciudades y Caballeros ----------
+function barbarianHtml() {
+  const strength = G.vertices.filter(v => v.building && v.building.type === 'ciudad').length;
+  const defense = G.players.reduce((s, p) => s + knightStrength(p.id), 0);
+  let track = '';
+  for (let i = 0; i <= BARB_TRACK; i++) track += `<span class="${i === G.barbPos ? 'ship' : ''} ${i === BARB_TRACK ? 'shore' : ''}">${i === G.barbPos ? '⛵' : i === BARB_TRACK ? '🏰' : ''}</span>`;
+  return `<div class="barbarians" title="El barco avanza con cada ⛵ del dado de eventos. Al llegar ataca: si la defensa (caballeros activos) es menor que la fuerza (número de ciudades), los que menos defendieron pierden una ciudad.">
+    <div class="barb-head"><b>Bárbaros</b><span class="${defense >= strength ? 'ok' : 'bad'}">⚔️ ${strength} fuerza · 🛡️ ${defense} defensa</span></div>
+    <div class="barb-track">${track}</div>
+    ${G.robberActive ? '' : '<div class="small muted">El ladrón no se mueve hasta el primer ataque.</div>'}
+  </div>`;
+}
+
+function ckButtons(a) {
+  const p = P(a);
+  const can = {
+    caballero: canAfford(a, CK_COSTS.caballero) && knightPiecesLeft(a, 1) > 0 && knightSpots(a).length > 0,
+    ascender: canAfford(a, CK_COSTS.ascender) && knightsOf(a).some(v => canPromote(a, v)),
+    activar: canAfford(a, CK_COSTS.activar) && knightsOf(a).some(v => !G.vertices[v].knight.active),
+    'mover-cab': knightsOf(a).some(v => knightMoveTargets(a, v).length),
+    expulsar: chaseRobberSpots(a).length > 0,
+    muralla: canAfford(a, CK_COSTS.muralla) && wallSpots(a).length > 0,
+  };
+  const b = (kind, label, icon, cost) => `<button class="build ${UI.mode === kind ? 'active' : ''}" data-act="mode" data-kind="${kind}" ${can[kind] ? '' : 'disabled'}>
+    <span>${icon} ${label}</span><span class="cost">${cost}</span></button>`;
+  let html = `<div class="ck-title">Caballeros <small>🛡️ ${knightStrength(a)} activos de ${knightStrength(a, false)}</small></div>
+    <div class="btn-grid">${b('caballero', 'Caballero', '🛡️', costIcons(CK_COSTS.caballero))}${b('ascender', 'Ascender', '⬆️', costIcons(CK_COSTS.ascender))}
+    ${b('activar', 'Activar', '✨', costIcons(CK_COSTS.activar))}${b('mover-cab', 'Mover', '🐎', 'caballero activo')}
+    ${b('expulsar', 'Expulsar ladrón', '🦹', 'caballero activo')}${b('muralla', 'Muralla', '🧱', costIcons(CK_COSTS.muralla) + ' · +2 cartas')}</div>`;
+  html += `<div class="ck-title">Mejoras de ciudad</div><div class="tracks">`;
+  for (const [k, t] of Object.entries(TRACKS)) {
+    const lvl = p.improve[k];
+    const metro = G.metropolis[k];
+    let dots = '';
+    for (let i = 1; i <= 5; i++) dots += `<i class="${i <= lvl ? 'on' : ''} ${i === 3 ? 'ab' : ''} ${i >= 4 ? 'mt' : ''}"></i>`;
+    html += `<div class="track" style="--tc:${t.color}" title="${t.ability} Nivel 4: metrópolis (+2 puntos).">
+      <span class="track-name">${t.gate} ${t.name}</span><span class="dots">${dots}</span>
+      ${metro ? `<span class="metro-tag" title="Metrópolis">🏙️ ${esc(P(metro.owner).name)}</span>` : ''}
+      <button data-act="improve" data-track="${k}" ${canImprove(a, k) ? '' : 'disabled'}>${lvl >= 5 ? 'Máx.' : `${improveCost(a, k)} ${RES_INFO[t.com].icon}`}</button>
+    </div>`;
+  }
+  return html + '</div>';
+}
+
+function progressHandHtml(v) {
+  const p = P(v);
+  if (!p.progress) return '';
+  const cards = p.progress.map(c => {
+    const info = PROGRESS[c.type];
+    if (!info) return `<div class="dev prog"><span class="dev-ic">📘</span><span class="dev-name">Carta de progreso</span></div>`;
+    const canPlay = humanActor() === v && progressPlayable(v, c.type);
+    return `<div class="dev prog deck-${info.deck}" title="${info.desc}">
+      <span class="dev-ic">${info.icon}</span><span class="dev-name">${info.name}<small>${info.desc}</small></span>
+      <button data-act="play-progress" data-card="${c.type}" ${canPlay ? '' : 'disabled'}>Jugar</button></div>`;
+  }).join('');
+  const extra = [];
+  if (p.vpCards) extra.push(`🏆 ${p.vpCards} carta(s) de punto`);
+  if (p.defender) extra.push(`🛡️ ${p.defender} Defensor de Catán`);
+  return `<div class="devs">${cards || '<div class="muted small">Sin cartas de progreso (máximo 4).</div>'}</div>
+    ${extra.length ? `<div class="small muted">${extra.join(' · ')}</div>` : ''}`;
+}
+
+function pendingPanelHtml() {
+  const pd = G.pending;
+  const mine = humanActor() === pd.pid;
+  if (!mine) return `<div class="info">⏳ ${pname(pd.pid)}: ${esc(pd.prompt)}…</div>`;
+  const onBoard = ['hex', 'vertex', 'edge'].includes(pd.kind);
+  return `<div class="info pending">${PROGRESS[pd.card] ? PROGRESS[pd.card].icon : '👉'} <b>${esc(pd.prompt)}</b>${onBoard ? '<br><small>Haz clic en una de las zonas brillantes del tablero.</small>' : ''}</div>
+    ${pd.step >= 2 ? '<button class="wide" data-act="pick-skip">Saltar este paso</button>' : ''}
+    ${!onBoard ? '<button class="primary wide" data-act="reopen">Elegir</button>' : ''}`;
+}
+
+function showPendingModal() {
+  const pd = G.pending;
+  let body = '';
+  if (pd.kind === 'dice') {
+    UI.alch = UI.alch || { red: 1, yellow: 1 };
+    const row = (key, label) => `<div class="alch-row"><b>${label}</b>${[1, 2, 3, 4, 5, 6].map(n =>
+      `<button class="alch ${UI.alch[key] === n ? 'sel' : ''}" data-act="alch" data-k="${key}" data-n="${n}">${dieHtml(n, '')}</button>`).join('')}</div>`;
+    body = row('red', '🔴 Rojo') + row('yellow', '🟡 Amarillo') +
+      `<p class="muted small">Suma: ${UI.alch.red + UI.alch.yellow}. El dado rojo también decide las cartas de progreso.</p>
+      <div class="modal-foot"><button class="primary" data-act="alch-ok">Tirar con estos dados</button></div>`;
+  } else if (pd.kind === 'player') {
+    body = `<div class="choice-list">${pd.options.map(o => `<button data-act="pick" data-value="${o}">${pname(o)} <small>🃏 ${handSize(P(o))} · ${vp(o, false)} puntos</small></button>`).join('')}</div>`;
+  } else if (pd.kind === 'card') {
+    body = `<div class="res-picks">${pd.options.map(r => `<button class="pick" style="--c:${RES_INFO[r].color}" data-act="pick" data-value="${r}">
+      <span class="ic">${RES_INFO[r].icon}</span><span>${RES_INFO[r].name}</span></button>`).join('')}</div>`;
+  }
+  openModal('pending', `<h2>${PROGRESS[pd.card] ? PROGRESS[pd.card].icon + ' ' + PROGRESS[pd.card].name : 'Elige'}</h2>
+    <p>${esc(pd.prompt)}</p>${body}`);
 }
 
 function buildButtons(a) {
@@ -428,11 +549,12 @@ function buildButtons(a) {
   const can = {
     camino: canAfford(a, COSTS.camino) && p.roads > 0 && roadSpots(a).length > 0,
     poblado: canAfford(a, COSTS.poblado) && p.settlements > 0 && settlementSpots(a, false).length > 0,
-    ciudad: canAfford(a, COSTS.ciudad) && p.cities > 0 && citySpots(a).length > 0,
+    ciudad: canAfford(a, G.ck && G.medicine[a] ? { mineral: 2, trigo: 1 } : COSTS.ciudad) && p.cities > 0 && citySpots(a).length > 0,
   };
   const b = (kind, label, icon) => `<button class="build ${UI.mode === kind ? 'active' : ''}" data-act="mode" data-kind="${kind}" ${can[kind] ? '' : 'disabled'}>
     <span>${icon} ${label}</span><span class="cost">${costIcons(COSTS[kind])}</span></button>`;
   const canDev = canAfford(a, COSTS.carta) && G.devDeck.length > 0;
+  if (G.ck) return `<div class="btn-grid">${b('camino', 'Camino', '🛤️')}${b('poblado', 'Poblado', '🏠')}${b('ciudad', 'Ciudad', '🏰')}</div>`;
   let sea = '';
   if (G.seafarers) {
     can.barco = canAfford(a, COSTS.barco) && p.ships > 0 && shipSpots(a).length > 0;
@@ -448,8 +570,8 @@ function renderHand() {
   const v = viewerId();
   if (v == null) { $('#hand').innerHTML = ''; return; }
   const p = P(v);
-  let html = `<h3><span>Mano de ${pname(v)}</span></h3><div class="cards">`;
-  html += RES.map(r => `<div class="card ${p.res[r] ? '' : 'zero'}" style="--c:${RES_INFO[r].color}" title="${RES_INFO[r].name}">
+  let html = `<h3><span>Mano de ${pname(v)}</span>${G.ck ? `<small>límite ${handLimit(v)}</small>` : ''}</h3><div class="cards ${G.ck ? 'ck' : ''}">`;
+  html += handTypes().map(r => `<div class="card ${p.res[r] ? '' : 'zero'}" style="--c:${RES_INFO[r].color}" title="${RES_INFO[r].name}">
     <span class="ic">${RES_INFO[r].icon}</span><span class="n">${p.res[r]}</span><span class="lbl">${RES_INFO[r].name}</span></div>`).join('');
   html += '</div>';
 
@@ -472,10 +594,11 @@ function renderHand() {
       </div>`;
     }
     html += '</div>';
-  } else html += '<div class="muted small">Sin cartas de desarrollo.</div>';
+  } else if (!G.ck) html += '<div class="muted small">Sin cartas de desarrollo.</div>';
 
+  if (G.ck) html += progressHandHtml(v);
   html += `<div class="pieces">Piezas: 🛤️ ${p.roads} · 🏠 ${p.settlements} · 🏰 ${p.cities}${G.seafarers ? ` · ⛵ ${p.ships}` : ''}</div>
-    <div class="rates">Banco: ${RES.map(r => `<span>${RES_INFO[r].icon} ${bankRate(v, r)}:1</span>`).join('')}</div>`;
+    <div class="rates">Banco: ${handTypes().map(r => `<span>${RES_INFO[r].icon} ${bankRate(v, r)}:1</span>`).join('')}</div>`;
   $('#hand').innerHTML = html;
 }
 
@@ -506,6 +629,10 @@ function syncModals() {
   const a = humanActor();
   if (G.phase === 'gameover') { if (!UI.winnerShown) { UI.winnerShown = true; showWinner(); } return; }
   if (offerTargets().length) { if (UI.modal !== 'offer') showOffer(); return; }
+  if (G.pending && a === G.pending.pid && ['dice', 'player', 'card'].includes(G.pending.kind)) {
+    if (UI.modal !== 'pending') showPendingModal();
+    return;
+  }
   if (G.phase === 'discard' && a != null) { if (UI.modal !== 'discard-' + a) showDiscard(a); return; }
   if (G.phase === 'steal' && a != null) { if (UI.modal !== 'steal') showSteal(); return; }
   if (G.phase === 'gold' && a != null) { if (UI.modal !== 'gold-' + a) showGold(a); return; }
@@ -513,7 +640,7 @@ function syncModals() {
     if (UI.modal !== 'trade-resp') showTradeResp();
     return;
   }
-  if (UI.modal && /^(discard|steal|offer|winner|trade-resp|gold)/.test(UI.modal)) closeModal();
+  if (UI.modal && /^(discard|steal|offer|winner|trade-resp|gold|pending)/.test(UI.modal)) closeModal();
   const myTurn = (G.phase === 'main' && a === G.current) || (G.phase === 'paired' && a === G.partner);
   if (['bank', 'yop', 'mono'].includes(UI.modal) && !myTurn) closeModal();
   if (UI.modal === 'trade' && !(G.phase === 'main' && a === G.current)) closeModal();
@@ -521,8 +648,8 @@ function syncModals() {
   if (UI.modal === 'bank') renderBankModal();
 }
 
-function stepper(prefix, sel, max) {
-  return `<div class="steppers">${RES.map(r => `<div class="stepper" style="--c:${RES_INFO[r].color}">
+function stepper(prefix, sel, max, types = handTypes()) {
+  return `<div class="steppers">${types.map(r => `<div class="stepper" style="--c:${RES_INFO[r].color}">
     <span class="ic">${RES_INFO[r].icon}</span>
     <button data-act="${prefix}" data-r="${r}" data-d="-1" ${sel[r] <= 0 ? 'disabled' : ''}>−</button>
     <span class="val">${sel[r]}</span>
@@ -552,7 +679,7 @@ function showGold(pid) {
   const need = Math.min(G.goldNeed[pid], RES.reduce((s, r) => s + G.bank[r], 0)), sel = UI.goldSel, n = total(sel);
   openModal('gold-' + pid, `<h2>💰 ${pname(pid)}: río de oro</h2>
     <p>Elige ${need} recurso(s) del banco.</p>
-    ${stepper('gsel', sel, n >= need ? sel : G.bank)}
+    ${stepper('gsel', sel, n >= need ? sel : G.bank, RES)}
     <div class="modal-foot"><span class="counter ${n === need ? 'ok' : ''}">${n} / ${need}</span>
     <button class="primary" data-act="gold-ok" ${n === need ? '' : 'disabled'}>Tomar</button></div>`);
 }
@@ -576,12 +703,12 @@ function renderBankModal() {
   const ok = s.give && s.get && s.give !== s.get && G.bank[s.get] > 0;
   openModal('bank', `<h2>🏦 Comercio con el banco</h2>
     <p class="muted">Cambia cartas iguales por una carta del banco. Tasa normal 4:1; con puerto 3:1 o 2:1.</p>
-    <h3>Entregas</h3><div class="res-picks">${RES.map(r => {
+    <h3>Entregas</h3><div class="res-picks">${handTypes().map(r => {
       const rt = bankRate(a, r);
       return `<button class="pick ${s.give === r ? 'sel' : ''}" style="--c:${RES_INFO[r].color}" data-act="bank-give" data-r="${r}" ${p.res[r] >= rt ? '' : 'disabled'}>
         <span class="ic">${RES_INFO[r].icon}</span><span>${rt}:1</span><small>tienes ${p.res[r]}</small></button>`;
     }).join('')}</div>
-    <h3>Recibes</h3><div class="res-picks">${RES.map(r => `<button class="pick ${s.get === r ? 'sel' : ''}" style="--c:${RES_INFO[r].color}" data-act="bank-get" data-r="${r}" ${r === s.give || !G.bank[r] ? 'disabled' : ''}>
+    <h3>Recibes</h3><div class="res-picks">${handTypes().map(r => `<button class="pick ${s.get === r ? 'sel' : ''}" style="--c:${RES_INFO[r].color}" data-act="bank-get" data-r="${r}" ${r === s.give || !G.bank[r] ? 'disabled' : ''}>
         <span class="ic">${RES_INFO[r].icon}</span><span>${RES_INFO[r].name}</span><small>banco ${G.bank[r]}</small></button>`).join('')}</div>
     <div class="modal-foot"><button data-act="close">Cerrar</button>
     <button class="primary" data-act="bank-ok" ${ok ? '' : 'disabled'}>Cambiar ${ok ? `${rate} ${RES_INFO[s.give].icon} → 1 ${RES_INFO[s.get].icon}` : ''}</button></div>`);
@@ -598,7 +725,7 @@ function openTrade() {
 }
 function renderTradeModal() {
   const a = G.current, p = P(a), t = UI.trade, tr = myTrade();
-  const valid = total(t.give) > 0 && total(t.get) > 0 && !RES.some(r => t.give[r] && t.get[r]);
+  const valid = total(t.give) > 0 && total(t.get) > 0 && !CARDS.some(r => t.give[r] && t.get[r]);
   let resp = '';
   if (tr) {
     resp = '<h3>Respuestas</h3><div class="choice-list">' + G.players.filter(o => o.id !== a).map(o => {
@@ -625,7 +752,7 @@ function renderTradeModal() {
 // --- Respuesta a una propuesta (online, jugador que no está en turno) ---
 function showTradeResp() {
   const tr = G.trade, me = P(NET.seat);
-  const has = RES.every(r => me.res[r] >= tr.get[r]);
+  const has = CARDS.every(r => me.res[r] >= tr.get[r]);
   openModal('trade-resp', `<h2>🤝 ${pname(tr.from)} propone un intercambio</h2>
     ${offerLine(tr.give, tr.get, 'Te da', 'A cambio de')}
     ${has ? '' : '<p class="muted center">No tienes las cartas que pide.</p>'}
@@ -640,7 +767,7 @@ function showOffer() {
   openModal('offer', `<h2>Oferta de ${pname(o.from)}</h2>
     ${offerLine(o.give, o.get, 'Te da', 'A cambio de')}
     <div class="choice-list">${targets.map(pid => {
-      const has = RES.every(r => P(pid).res[r] >= o.get[r]);
+      const has = CARDS.every(r => P(pid).res[r] >= o.get[r]);
       return `<button class="primary" data-act="offer-yes" data-p="${pid}" ${has ? '' : 'disabled'}>Aceptar${UI.online ? '' : ` (${esc(P(pid).name)})`}</button>`;
     }).join('')}
     <button data-act="offer-no">Rechazar</button></div>`);
@@ -712,6 +839,13 @@ function showRules() {
     <li><b>Ríos de oro:</b> producen el recurso que tú elijas.</li>
     <li><b>Pirata:</b> con un 7 o un caballero puedes mover el pirata en vez del ladrón. Bloquea los barcos junto a él y roba a quien tenga barcos allí.</li>
     <li>La Gran Ruta Comercial cuenta caminos y barcos.</li></ul>
+    <h3>🏰 Ciudades y Caballeros</h3>
+    <ul><li>Las <b>ciudades</b> producen 1 recurso + 1 <b>mercancía</b>: bosque → 📜 papel, pasto → 🧵 tela, montaña → 🪙 moneda. La segunda pieza inicial es una ciudad.</li>
+    <li><b>Dado de eventos:</b> ⛵ hace avanzar a los bárbaros; una puerta de color reparte cartas de progreso a quien tenga esa mejora y un dado rojo bajo (nivel + 1 o menos).</li>
+    <li><b>Bárbaros:</b> al llegar atacan con tantas fuerzas como ciudades haya. Si los caballeros activos suman igual o más, quien más aportó gana un punto (Defensor de Catán); si no, quien menos aportó pierde una ciudad. Las metrópolis no se pierden.</li>
+    <li><b>Caballeros</b> (${costIcons(CK_COSTS.caballero)}): se colocan junto a tus caminos, se ascienden (${costIcons(CK_COSTS.ascender)}) y se activan con ${costIcons(CK_COSTS.activar)}. Activos pueden moverse, desplazar a uno más débil o expulsar al ladrón.</li>
+    <li><b>Mejoras de ciudad</b> con mercancías (nivel n cuesta n). Nivel 3: Casa de comercio (2:1 mercancías), Fortaleza (caballeros poderosos) o Acueducto. Nivel 4: metrópolis (+2 puntos).</li>
+    <li><b>Murallas</b> (${costIcons(CK_COSTS.muralla)}): +2 al límite de cartas cada una. El ladrón no actúa hasta el primer ataque. No hay cartas de desarrollo.</li></ul>
     <h3>Opciones</h3>
     <p><b>Variantes:</b> ${Object.values(VARIANTS).map(v => `${v.icon} <b>${v.name}</b>: ${v.desc}`).join(' ')}</p>
     <p>Si con muchos puntos para ganar ya nadie puede conseguir más, la partida termina y gana quien más puntos tenga.</p>
@@ -754,7 +888,7 @@ function onClick(ev) {
   const a = humanActor();
   switch (act) {
     case 'roll': send({ type: 'roll' }); break;
-    case 'mode': UI.mode = UI.mode === t.dataset.kind ? null : t.dataset.kind; UI.moveFrom = null; render(); break;
+    case 'mode': UI.mode = UI.mode === t.dataset.kind ? null : t.dataset.kind; UI.moveFrom = null; UI.knightFrom = null; render(); break;
     case 'buy': send({ type: 'buy' }); break;
     case 'end-turn': send({ type: 'end-turn' }); break;
     case 'end-special': send({ type: 'end-special' }); break;
@@ -766,6 +900,12 @@ function onClick(ev) {
     case 'dsel': UI.discardSel[r] += d; showDiscard(a); break;
     case 'discard-ok': send({ type: 'discard', sel: UI.discardSel }); break;
     case 'gsel': UI.goldSel[r] += d; showGold(a); break;
+    case 'improve': send({ type: 'ck-improve', track: t.dataset.track }); break;
+    case 'play-progress': UI.alch = null; send({ type: 'progress', card: t.dataset.card }); break;
+    case 'pick': send({ type: 'pick', value: G.pending && G.pending.kind === 'card' ? t.dataset.value : +t.dataset.value }); closeModal(); break;
+    case 'pick-skip': send({ type: 'pick-skip' }); break;
+    case 'alch': UI.alch[t.dataset.k] = +t.dataset.n; showPendingModal(); break;
+    case 'alch-ok': send({ type: 'pick', value: UI.alch }); closeModal(); break;
     case 'gold-ok': send({ type: 'gold', sel: UI.goldSel }); break;
     case 'steal': send({ type: 'steal', p }); break;
     // banco
@@ -805,7 +945,7 @@ function onKey(ev) {
     if (UI.modal && ['bank', 'trade', 'yop', 'mono', 'rules', 'winner'].includes(UI.modal)) {
       if (UI.modal === 'trade' && G && myTrade() && humanActor() === G.current) send({ type: 'trade-cancel' });
       closeModal(); render();
-    } else if (UI.mode) { UI.mode = null; UI.moveFrom = null; render(); }
+    } else if (UI.mode) { UI.mode = null; UI.moveFrom = null; UI.knightFrom = null; render(); }
   }
   if (ev.key === ' ' && !typing && G && G.phase === 'roll' && humanActor() != null && !UI.modal) {
     ev.preventDefault();

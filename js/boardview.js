@@ -166,7 +166,7 @@ function settlementSvg(x, y, c) {
   </g>`;
 }
 
-function citySvg(x, y, c) {
+function citySvg(x, y, c, metro) {
   const d = shade(c, -.3), l = shade(c, .25), roof = shade(c, -.45);
   return `<g transform="translate(${f1(x)},${f1(y)}) scale(1.2)" class="piece">
     <ellipse cy="4" rx="17" ry="5.5" fill="rgba(0,0,0,.35)"/>
@@ -180,6 +180,8 @@ function citySvg(x, y, c) {
     <rect x="-9" y="-15" width="3" height="4" fill="${shade(c, -.55)}"/>
     <rect x="-2" y="0" width="3" height="5" fill="${shade(c, -.55)}"/>
     <path d="M-14 6 H4 L11 2 V-8 L1 -8 V-21.5 L-7.5 -29 L-12 -19 V-4 H-14 Z" fill="none" stroke="#111" stroke-width="1.1" stroke-linejoin="round"/>
+    ${metro ? `<path d="M-7.5 -29 V-40 L2 -37 L-7.5 -34" fill="${TRACKS[metro].color}" stroke="#111" stroke-width=".8"/>
+      <circle cx="-7.5" cy="-29" r="2.5" fill="#ffe27a" stroke="#111" stroke-width=".6"/>` : ''}
   </g>`;
 }
 
@@ -205,6 +207,34 @@ function pirateSvg(x, y) {
     <title>Pirata</title></g>`;
 }
 
+function knightSvg(x, y, c, level, active) {
+  const bars = Array.from({ length: level }, (_, i) => `<rect x="${-5 + i * 4}" y="-2" width="2.4" height="5" fill="${active ? '#fff' : '#ddd'}"/>`).join('');
+  return `<g transform="translate(${f1(x)},${f1(y)}) scale(1.05)" class="piece knight ${active ? 'active' : 'inactive'}">
+    <ellipse cy="5" rx="10" ry="3.5" fill="rgba(0,0,0,.35)"/>
+    <path d="M-9 -12 H9 V-2 C9 4 4 7 0 9 C-4 7 -9 4 -9 -2 Z" fill="${active ? c : shade(c, -.25)}" stroke="#111" stroke-width="1.2" stroke-linejoin="round"/>
+    <path d="M-9 -12 H0 V9 C-4 7 -9 4 -9 -2 Z" fill="rgba(255,255,255,.18)"/>
+    ${bars}
+    ${active ? '<path d="M0 -12 V-22 L8 -19 L0 -16" fill="#ffe27a" stroke="#6b520f" stroke-width=".8"/>' : '<circle cx="0" cy="-16" r="3" fill="#666" stroke="#222" stroke-width=".8"/>'}
+  </g>`;
+}
+
+function wallSvg(x, y) {
+  return `<g transform="translate(${f1(x)},${f1(y)})" class="piece">
+    <ellipse cy="7" rx="22" ry="8" fill="#7d7d84" stroke="#3a3a40" stroke-width="1.2"/>
+    <ellipse cy="5" rx="22" ry="8" fill="#a3a3aa" stroke="#3a3a40" stroke-width="1.2"/>
+    ${[-18, -9, 0, 9, 18].map(dx => `<rect x="${dx - 2.5}" y="${3 - Math.abs(dx) / 6}" width="5" height="4" fill="#8b8b92" stroke="#3a3a40" stroke-width=".6"/>`).join('')}
+  </g>`;
+}
+
+function merchantSvg(x, y, c) {
+  return `<g transform="translate(${f1(x)},${f1(y)})" class="robber">
+    <ellipse cy="2" rx="9" ry="3.5" fill="rgba(0,0,0,.35)"/>
+    <path d="M-7 2 C-7 -6 -4 -9 0 -9 C4 -9 7 -6 7 2 Z" fill="${c}" stroke="#111" stroke-width="1"/>
+    <circle cy="-13" r="5" fill="#f1c9a0" stroke="#111" stroke-width="1"/>
+    <path d="M-6 -16 H6 L4 -21 H-4 Z" fill="#3b2a12"/>
+    <title>Mercader</title></g>`;
+}
+
 function robberSvg(x, y) {
   return `<g transform="translate(${f1(x)},${f1(y)})" class="robber">
     <ellipse cy="2" rx="11" ry="4" fill="rgba(0,0,0,.4)"/>
@@ -217,8 +247,17 @@ function robberSvg(x, y) {
 function renderBoard() {
   setViewParams();
   const a = humanActor();
-  let vT = [], eT = [], cT = [], sT = [], msT = [], hT = false;
-  if (a != null) {
+  let vT = [], eT = [], cT = [], sT = [], msT = [], hT = false, kT = [], pick = null;
+  if (a != null && G.pending && G.pending.pid === a && ['hex', 'vertex', 'edge'].includes(G.pending.kind)) pick = G.pending;
+  else if (a != null && G.ck && canBuildNow(a) && G.phase === 'main') {
+    if (UI.mode === 'caballero') kT = knightSpots(a);
+    else if (UI.mode === 'ascender') kT = knightsOf(a).filter(v => canPromote(a, v));
+    else if (UI.mode === 'activar') kT = knightsOf(a).filter(v => !G.vertices[v].knight.active);
+    else if (UI.mode === 'mover-cab') kT = UI.knightFrom == null ? knightsOf(a).filter(v => knightMoveTargets(a, v).length) : knightMoveTargets(a, UI.knightFrom);
+    else if (UI.mode === 'expulsar') kT = chaseRobberSpots(a);
+    else if (UI.mode === 'muralla') kT = wallSpots(a);
+  }
+  if (a != null && !pick) {
     const me = P(a);
     if (G.phase === 'setup-settlement') vT = settlementSpots(a, true);
     else if (G.phase === 'setup-road') { eT = roadSpots(a, G.lastSettlement); sT = shipSpots(a, G.lastSettlement); }
@@ -374,10 +413,22 @@ function renderBoard() {
   const [rx, ry] = pr(rh.x - (rh.number ? 33 : 0), rh.y + (rh.number ? 8 : 4));
   pieces.push({ y: ry, svg: robberSvg(rx, ry) });
   for (const v of G.vertices) {
-    if (!v.building) continue;
     const [x, y] = pr(v.x, v.y);
+    if (v.knight) {
+      const k = v.knight;
+      pieces.push({ y, svg: knightSvg(x, y, P(k.owner).color, k.level, k.active) +
+        `<title>${KNIGHT_NAMES[k.level]} de ${esc(P(k.owner).name)} (${k.active ? 'activo' : 'inactivo'})</title>` });
+    }
+    if (!v.building) continue;
     const c = P(v.building.owner).color;
-    pieces.push({ y, svg: (v.building.type === 'ciudad' ? citySvg(x, y, c) : settlementSvg(x, y, c)) + `<title>${esc(P(v.building.owner).name)}: ${v.building.type}</title>` });
+    const wall = v.building.wall ? wallSvg(x, y) : '';
+    const name = v.building.metro ? `metrópolis de ${TRACKS[v.building.metro].name.toLowerCase()}` : v.building.type + (v.building.wall ? ' con muralla' : '');
+    pieces.push({ y, svg: wall + (v.building.type === 'ciudad' ? citySvg(x, y, c, v.building.metro) : settlementSvg(x, y, c)) + `<title>${esc(P(v.building.owner).name)}: ${name}</title>` });
+  }
+  if (G.ck && G.merchant) {
+    const mh = G.hexes[G.merchant.hex];
+    const [x, y] = pr(mh.x + 30, mh.y + 6);
+    pieces.push({ y, svg: merchantSvg(x, y, P(G.merchant.owner).color) });
   }
   pieces.sort((p, q) => p.y - q.y).forEach(p => out.push(p.svg));
 
@@ -408,6 +459,25 @@ function renderBoard() {
     const [a1, b1] = G.edges[UI.moveFrom].v.map(id => G.vertices[id]);
     const [x, y] = pr((a1.x + b1.x) / 2, (a1.y + b1.y) / 2);
     out.push(`<circle cx="${f1(x)}" cy="${f1(y - 5)}" r="16" class="ship-selected"/>`);
+  }
+  for (const vid of kT) {
+    const [x, y] = pr(G.vertices[vid].x, G.vertices[vid].y);
+    out.push(`<circle cx="${f1(x)}" cy="${f1(y - 4)}" r="13" class="v-target knight-target ${UI.knightFrom === vid ? 'chosen' : ''}" data-kv="${vid}"/>`);
+  }
+  if (pick) {
+    for (const o of pick.options) {
+      if (pick.kind === 'hex') {
+        const h = G.hexes[o];
+        out.push(`<polygon points="${polyStr(hexCorners(h.x, h.y, HEX_R - 4))}" class="hex-hit" data-pick="${o}"><title>${hexName(h)}</title></polygon>`);
+      } else if (pick.kind === 'vertex') {
+        const [x, y] = pr(G.vertices[o].x, G.vertices[o].y);
+        out.push(`<circle cx="${f1(x)}" cy="${f1(y - 4)}" r="14" class="v-target knight-target" data-pick="${o}"/>`);
+      } else {
+        const [a1, b1] = G.edges[o].v.map(id => G.vertices[id]);
+        const p1 = pr(a1.x, a1.y), p2 = pr(b1.x, b1.y);
+        out.push(`<line x1="${f1(p1[0])}" y1="${f1(p1[1])}" x2="${f1(p2[0])}" y2="${f1(p2[1])}" class="edge-target" data-pick="${o}"/>`);
+      }
+    }
   }
   if (hT) {
     for (const h of G.hexes) {

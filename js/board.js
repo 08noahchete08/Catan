@@ -5,12 +5,19 @@
 
 const RES = ['madera', 'arcilla', 'lana', 'trigo', 'mineral'];
 
+// Mercancías (Ciudades y Caballeros)
+const COM = ['papel', 'tela', 'moneda'];
+const CARDS = RES.concat(COM);
+
 const RES_INFO = {
   madera:  { name: 'Madera',  icon: '🪵', color: '#3f7d3a' },
   arcilla: { name: 'Arcilla', icon: '🧱', color: '#c8693c' },
   lana:    { name: 'Lana',    icon: '🐑', color: '#8fbf4d' },
   trigo:   { name: 'Trigo',   icon: '🌾', color: '#e0b43a' },
   mineral: { name: 'Mineral', icon: '🪨', color: '#7d8590' },
+  papel:   { name: 'Papel',   icon: '📜', color: '#4e9a3a', com: true },
+  tela:    { name: 'Tela',    icon: '🧵', color: '#c9a227', com: true },
+  moneda:  { name: 'Moneda',  icon: '🪙', color: '#3f6fb5', com: true },
 };
 
 const TERRAIN = {

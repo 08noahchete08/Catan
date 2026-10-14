@@ -33,14 +33,17 @@ const WIN_POINTS = 10;
 let G = null;
 
 // ---------- utilidades ----------
-function zeroRes() { return { madera: 0, arcilla: 0, lana: 0, trigo: 0, mineral: 0 }; }
-function total(res) { return RES.reduce((s, r) => s + (res[r] || 0), 0); }
+function zeroRes() { return { madera: 0, arcilla: 0, lana: 0, trigo: 0, mineral: 0, papel: 0, tela: 0, moneda: 0 }; }
+// Total de cartas en mano (recursos y, en Ciudades y Caballeros, mercancías)
+function total(res) { return CARDS.reduce((s, r) => s + (res[r] || 0), 0); }
+// Tipos de carta que se usan en esta partida
+function handTypes() { return G && G.ck ? CARDS : RES; }
 function rand(n) { return Math.floor(Math.random() * n); }
 function P(id) { return G.players[id]; }
 function esc(s) { return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 function pname(pid) { const p = P(pid); return `<span class="pn" style="--pc:${p.color}">${esc(p.name)}</span>`; }
 function resStr(obj) {
-  return RES.filter(r => obj[r] > 0).map(r => RES_INFO[r].icon.repeat(Math.min(obj[r], 6)) + (obj[r] > 6 ? `×${obj[r]}` : '')).join(' ') || 'nada';
+  return CARDS.filter(r => obj[r] > 0).map(r => RES_INFO[r].icon.repeat(Math.min(obj[r], 6)) + (obj[r] > 6 ? `×${obj[r]}` : '')).join(' ') || 'nada';
 }
 function log(html) { G.log.push({ turn: G.turn, html }); if (G.log.length > 250) G.log.shift(); }
 function hexName(h) { return TERRAIN[h.terrain].name + (h.number ? ` (${h.number})` : ''); }
@@ -50,6 +53,7 @@ function newGame(setup, opts) {
   const n = setup.length;
   const cfg = CONFIGS[n > 4 ? 'ext' : 'base'];
   const seafarers = opts.expansion === 'seafarers';
+  const ck = opts.expansion === 'ck';
   const board = seafarers ? generateSeaBoard(n) : generateBoard(cfg);
   const start = rand(n);
   const order = [];
@@ -75,7 +79,7 @@ function newGame(setup, opts) {
     // Reglas para 5-6 jugadores: 'paired' (turnos en pareja, 2023), 'special' (fase especial clásica) o 'none'
     mode5: n > 4 && ['paired', 'special', 'none'].includes(opts.mode5) ? opts.mode5 : (n > 4 && opts.mode5 == null ? 'paired' : 'none'),
     partner: null, pairedActive: false,
-    expansion: seafarers ? 'seafarers' : 'none', seafarers,
+    expansion: seafarers ? 'seafarers' : ck ? 'ck' : 'none', seafarers, ck, pending: null,
     goldNeed: {}, goldQueue: [], afterGold: null, shipMoved: false,
     variants: cleanVariants(opts.variants), harborHolder: null, eventDeck: null, newYearAt: 0, epidemic: false, lastEvent: null,
     phase: 'setup-settlement',
@@ -89,7 +93,8 @@ function newGame(setup, opts) {
     log: [],
   };
   annotateBoard();
-  log(`Nueva partida: ${n} jugadores, ${seafarers ? '⛵ Navegantes de Catán' : `tablero ${cfg.id === 'ext' ? 'ampliado (5-6)' : 'básico'}`}. Empieza ${pname(order[0])}.`);
+  if (ck) initCK();
+  log(`Nueva partida: ${n} jugadores, ${seafarers ? '⛵ Navegantes de Catán' : ck ? '🏰 Ciudades y Caballeros' : `tablero ${cfg.id === 'ext' ? 'ampliado (5-6)' : 'básico'}`}. Empieza ${pname(order[0])}.`);
 }
 
 // Jugador controlado por la IA (de forma permanente o porque se ha desconectado)
@@ -104,6 +109,7 @@ function partnerOf(pid) { return (pid + 3) % G.players.length; }
 
 function actor() {
   if (!G) return null;
+  if (G.pending) return G.pending.pid;
   if (G.phase === 'discard') return G.discardQueue[0];
   if (G.phase === 'special-build') return G.specialBuilder;
   if (G.phase === 'gold') return G.goldQueue[0];
@@ -117,6 +123,7 @@ function vp(pid, includeHidden = true) {
   if (G.armyHolder === pid) s += 2;
   if (G.harborHolder === pid) s += 2;
   s += (P(pid).islands || []).length * 2;
+  if (G.ck) s += vpCK(pid);
   if (includeHidden) s += P(pid).dev.filter(d => d.type === 'puntos').length;
   return s;
 }
@@ -139,7 +146,7 @@ function canBuildNow(pid) {
 // ---------- validación de posiciones ----------
 function validSettlementSpot(pid, vid, ignoreRoad) {
   const v = G.vertices[vid];
-  if (v.building || v.land === false) return false;
+  if (v.building || v.knight || v.land === false) return false;
   if (v.adj.some(a => G.vertices[a].building)) return false;
   // Sin «cortar caminos»: no se puede construir donde pasa el camino de otro jugador
   if (!G.cutRoads) {
@@ -162,6 +169,7 @@ function validRoadSpot(pid, eid, fromVertex) {
   return e.v.some(vid => {
     const v = G.vertices[vid];
     if (v.building) return v.building.owner === pid;
+    if (v.knight && v.knight.owner !== pid) return false;
     return v.edges.some(x => x !== eid && G.edges[x].road === pid);
   });
 }
@@ -188,9 +196,10 @@ function buildSettlement(pid, vid) {
   if (setup && G.seafarers && G.vertices[vid].island !== 0) return false;
   if (!setup) pay(pid, COSTS.poblado);
   const v = G.vertices[vid];
-  v.building = { owner: pid, type: 'poblado' };
-  p.settlements--;
-  log(`${pname(pid)} construye un poblado${v.port ? ' en un puerto' : ''}.`);
+  const asCity = setup && G.ck && G.setupIdx >= G.players.length;
+  v.building = { owner: pid, type: asCity ? 'ciudad' : 'poblado' };
+  if (asCity) p.cities--; else p.settlements--;
+  log(`${pname(pid)} construye ${asCity ? 'una ciudad' : 'un poblado'}${v.port ? ' en un puerto' : ''}.`);
   updateHarbormaster();
   if (!setup) claimIsland(pid, vid);
   if (setup) {
@@ -214,10 +223,12 @@ function buildSettlement(pid, vid) {
 
 function buildCity(pid, vid) {
   const p = P(pid);
-  if (!canBuildNow(pid) || !canAfford(pid, COSTS.ciudad) || p.cities <= 0) return false;
+  const cost = G.ck && G.medicine[pid] ? { mineral: 2, trigo: 1 } : COSTS.ciudad;
+  if (!canBuildNow(pid) || !canAfford(pid, cost) || p.cities <= 0) return false;
   const v = G.vertices[vid];
   if (!v.building || v.building.owner !== pid || v.building.type !== 'poblado') return false;
-  pay(pid, COSTS.ciudad);
+  pay(pid, cost);
+  if (G.ck) G.medicine[pid] = false;
   v.building.type = 'ciudad';
   p.cities--; p.settlements++;
   log(`${pname(pid)} mejora un poblado a ciudad.`);
@@ -294,7 +305,8 @@ function advanceSetup() {
 function rollDice() {
   if (G.phase !== 'roll') return false;
   let d = [rand(6) + 1, rand(6) + 1], event = null;
-  if (G.variants.eventCards) {
+  if (G.forcedDice) { d = G.forcedDice; G.forcedDice = null; }
+  else if (G.variants.eventCards) {
     const drawn = drawEventCard();
     d = drawn.dice;
     event = drawn.card.ev;
@@ -304,6 +316,10 @@ function rollDice() {
   G.lastEvent = null;
   log(`${pname(G.current)} ${G.variants.eventCards ? 'roba una carta de eventos' : 'tira los dados'}: <b>${s}</b>.`);
   if (event) applyEvent(event);
+  if (G.ck) {
+    resolveEventDie(rollEventDie(), d[0]);
+    if (G.phase === 'gameover') return true;
+  }
   if (s === 7) {
     const n = G.players.length;
     G.discardQueue = [];
@@ -311,13 +327,13 @@ function rollDice() {
     for (let i = 0; i < n; i++) {
       const pid = (G.current + i) % n;
       const t = total(P(pid).res);
-      if (t > 7) { G.discardQueue.push(pid); G.discardNeed[pid] = Math.floor(t / 2); }
+      if (t > handLimit(pid)) { G.discardQueue.push(pid); G.discardNeed[pid] = Math.floor(t / 2); }
     }
     G.afterRobber = 'main';
-    G.phase = G.discardQueue.length ? 'discard' : 'robber';
-    if (G.discardQueue.length) log(`Los jugadores con más de 7 cartas deben descartar la mitad.`);
+    G.phase = G.discardQueue.length ? 'discard' : robberPhaseAfter7();
+    if (G.discardQueue.length) log(`Los jugadores con demasiadas cartas deben descartar la mitad.`);
   } else {
-    produce(s);
+    if (G.ck) produceCK(s); else produce(s);
     G.epidemic = false;
     G.phase = 'main';
     startGold('main');
@@ -369,12 +385,21 @@ function discard(pid, sel) {
   if (G.phase !== 'discard' || G.discardQueue[0] !== pid) return false;
   const p = P(pid);
   if (total(sel) !== G.discardNeed[pid]) return false;
-  if (RES.some(r => (sel[r] || 0) < 0 || (sel[r] || 0) > p.res[r])) return false;
-  RES.forEach(r => { p.res[r] -= sel[r] || 0; G.bank[r] += sel[r] || 0; });
+  if (CARDS.some(r => (sel[r] || 0) < 0 || (sel[r] || 0) > p.res[r])) return false;
+  CARDS.forEach(r => { p.res[r] -= sel[r] || 0; G.bank[r] += sel[r] || 0; });
   log(`${pname(pid)} descarta ${G.discardNeed[pid]} cartas.`);
   G.discardQueue.shift();
-  if (!G.discardQueue.length) G.phase = 'robber';
+  if (!G.discardQueue.length) G.phase = robberPhaseAfter7();
   return true;
+}
+
+// En Ciudades y Caballeros el ladrón no se mueve hasta el primer ataque bárbaro
+function robberPhaseAfter7() {
+  if (G.ck && !G.robberActive) {
+    log('El ladrón no actúa hasta el primer ataque de los bárbaros.');
+    return 'main';
+  }
+  return 'robber';
 }
 
 function robberVictims(hid, pid) {
@@ -399,7 +424,11 @@ function moveRobber(hid) {
     log(`${pname(activePlayer())} mueve el ladrón a ${hexName(G.hexes[hid])}.`);
     victims = robberVictims(hid, activePlayer());
   }
-  if (!victims.length) G.phase = G.afterRobber;
+  if (G.bishop) {
+    G.bishop = false;
+    victims.forEach(doSteal);
+    G.phase = G.afterRobber;
+  } else if (!victims.length) G.phase = G.afterRobber;
   else if (victims.length === 1) doSteal(victims[0]);
   else { G.stealCandidates = victims; G.phase = 'steal'; }
   return true;
@@ -413,7 +442,7 @@ function steal(victim) {
 
 function doSteal(victim) {
   const pool = [];
-  RES.forEach(r => { for (let i = 0; i < P(victim).res[r]; i++) pool.push(r); });
+  CARDS.forEach(r => { for (let i = 0; i < P(victim).res[r]; i++) pool.push(r); });
   if (pool.length) {
     const r = pool[rand(pool.length)];
     P(victim).res[r]--;
@@ -500,6 +529,11 @@ function bankRate(pid, r) {
     if (v.port === 'generic') rate = Math.min(rate, 3);
     else if (v.port === r) rate = 2;
   }
+  if (G.ck) {
+    if (COM.includes(r) && P(pid).improve.trade >= 3) rate = 2;
+    if (G.merchant && G.merchant.owner === pid && TERRAIN[G.hexes[G.merchant.hex].terrain].res === r) rate = 2;
+    if (G.fleet && G.fleet.pid === pid && G.fleet.type === r) rate = 2;
+  }
   return rate;
 }
 
@@ -517,8 +551,8 @@ function bankTrade(pid, giveR, getR) {
 function playerTrade(a, b, giveObj, getObj) {
   if (G.phase !== 'main' || a !== G.current || b === a || P(b) == null) return false;
   if (!total(giveObj) || !total(getObj)) return false;
-  if (RES.some(r => (giveObj[r] || 0) > P(a).res[r] || (getObj[r] || 0) > P(b).res[r])) return false;
-  RES.forEach(r => {
+  if (CARDS.some(r => (giveObj[r] || 0) > P(a).res[r] || (getObj[r] || 0) > P(b).res[r])) return false;
+  CARDS.forEach(r => {
     const g = giveObj[r] || 0, w = getObj[r] || 0;
     P(a).res[r] += w - g;
     P(b).res[r] += g - w;
@@ -530,12 +564,12 @@ function playerTrade(a, b, giveObj, getObj) {
 // Propuesta del jugador en turno a todos los demás
 function proposeTrade(pid, giveObj, getObj) {
   if (G.phase !== 'main' || pid !== G.current) return false;
-  if (!total(giveObj) || !total(getObj) || RES.some(r => giveObj[r] && getObj[r])) return false;
-  if (RES.some(r => giveObj[r] > P(pid).res[r])) return false;
+  if (!total(giveObj) || !total(getObj) || CARDS.some(r => giveObj[r] && getObj[r])) return false;
+  if (CARDS.some(r => giveObj[r] > P(pid).res[r])) return false;
   const responses = {};
   for (const o of G.players) {
     if (o.id === pid) continue;
-    const has = RES.every(r => o.res[r] >= getObj[r]);
+    const has = CARDS.every(r => o.res[r] >= getObj[r]);
     responses[o.id] = !has ? 'no' : isBot(o.id) ? (AI.acceptTrade(o.id, pid, giveObj, getObj) ? 'yes' : 'no') : null;
   }
   G.trade = { from: pid, give: giveObj, get: getObj, responses };
@@ -546,7 +580,7 @@ function proposeTrade(pid, giveObj, getObj) {
 function respondTrade(pid, accept) {
   const t = G.trade;
   if (!t || !(pid in t.responses) || t.responses[pid] !== null) return false;
-  const has = RES.every(r => P(pid).res[r] >= t.get[r]);
+  const has = CARDS.every(r => P(pid).res[r] >= t.get[r]);
   t.responses[pid] = accept && has ? 'yes' : 'no';
   return true;
 }
@@ -586,14 +620,26 @@ function respondOffer(pid, accept) {
 function toInt(x) { const n = Number(x); return Number.isInteger(n) ? n : -1; }
 function cleanRes(o) {
   const r = zeroRes();
-  if (o && typeof o === 'object') RES.forEach(k => { const n = toInt(o[k]); r[k] = n > 0 && n <= 30 ? n : 0; });
+  if (o && typeof o === 'object') CARDS.forEach(k => { const n = toInt(o[k]); r[k] = n > 0 && n <= 30 ? n : 0; });
   return r;
 }
 
 function applyAction(pid, a) {
   if (!G || !a || G.phase === 'gameover' || !G.players[pid]) return false;
   const v = toInt(a.v), e = toInt(a.e), h = toInt(a.h);
+  // Mientras haya una elección pendiente solo se puede responder a ella
+  if (G.pending && a.type !== 'pick' && a.type !== 'pick-skip') return false;
   switch (a.type) {
+    case 'pick': return resolvePending(pid, a.value);
+    case 'pick-skip': return skipPending(pid);
+    case 'ck-knight': return !!G.vertices[v] && buildKnight(pid, v);
+    case 'ck-promote': return !!G.vertices[v] && promoteKnight(pid, v);
+    case 'ck-activate': return !!G.vertices[v] && activateKnight(pid, v);
+    case 'ck-move': return moveKnight(pid, toInt(a.from), toInt(a.to));
+    case 'ck-chase': return chaseRobber(pid, v);
+    case 'ck-wall': return !!G.vertices[v] && buildWall(pid, v);
+    case 'ck-improve': return improveCity(pid, a.track);
+    case 'progress': return PROGRESS[a.card] ? playProgress(pid, a.card) : false;
     case 'settle': return !!G.vertices[v] && buildSettlement(pid, v);
     case 'city': return !!G.vertices[v] && buildCity(pid, v);
     case 'road': return !!G.edges[e] && buildRoad(pid, e);
@@ -613,7 +659,7 @@ function applyAction(pid, a) {
     case 'roadbuilding': return playRoadBuilding(pid);
     case 'yop': return playAbundance(pid, a.r1, a.r2);
     case 'mono': return playMonopoly(pid, a.r);
-    case 'bank': return RES.includes(a.give) && RES.includes(a.get) && bankTrade(pid, a.give, a.get);
+    case 'bank': return handTypes().includes(a.give) && handTypes().includes(a.get) && bankTrade(pid, a.give, a.get);
     case 'trade-propose': return proposeTrade(pid, cleanRes(a.give), cleanRes(a.get));
     case 'trade-respond': return respondTrade(pid, !!a.accept);
     case 'trade-confirm': return confirmTrade(pid, toInt(a.to));
@@ -625,7 +671,7 @@ function applyAction(pid, a) {
 
 // ---------- turnos ----------
 function endTurn(pid) {
-  if (G.phase !== 'main' || pid !== G.current) return false;
+  if (G.phase !== 'main' || pid !== G.current || G.pending) return false;
   G.trade = null;
   log(`${pname(pid)} termina su turno.`);
   if (G.mode5 === 'paired') {
@@ -692,6 +738,7 @@ function nextTurn() {
   G.aiTrades = 0;
   G.aiOffers = 0;
   G.trade = null;
+  if (G.ck) ckTurnReset();
   checkWin();
   checkDeadlock();
 }
@@ -700,6 +747,7 @@ function nextTurn() {
 // Si ya nadie puede conseguir más puntos, gana quien tenga más.
 function canGainPoints(pid) {
   const p = P(pid);
+  if (G.ck) return true;
   if (G.devDeck.length) return true;
   if (p.cities > 0 && citySpots(pid).length) return true;
   if (p.settlements > 0 && (settlementSpots(pid, false).length || AI.roadTarget(pid))) return true;
@@ -731,7 +779,7 @@ function longestRoadFor(pid) {
   let best = 0;
   const used = new Set();
   const building = vid => G.vertices[vid].building;
-  const blocked = vid => { const b = building(vid); return b && b.owner !== pid; };
+  const blocked = vid => { const b = building(vid), k = G.vertices[vid].knight; return (b && b.owner !== pid) || (k && k.owner !== pid); };
   const own = vid => { const b = building(vid); return b && b.owner === pid; };
   const kind = e => (e.road === pid ? 'r' : e.ship === pid ? 's' : null);
   function dfs(vid, len, last) {

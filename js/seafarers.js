@@ -266,7 +266,7 @@ function startGold(after) {
 function chooseGold(pid, sel) {
   if (G.phase !== 'gold' || G.goldQueue[0] !== pid) return false;
   const need = Math.min(G.goldNeed[pid], RES.reduce((s, r) => s + G.bank[r], 0));
-  if (total(sel) !== need || RES.some(r => sel[r] > G.bank[r])) return false;
+  if (total(sel) !== need || COM.some(c => sel[c]) || RES.some(r => sel[r] > G.bank[r])) return false;
   RES.forEach(r => give(pid, r, sel[r]));
   log(`${pname(pid)} recibe ${resStr(sel)} del río de oro.`);
   G.goldNeed[pid] = 0;
